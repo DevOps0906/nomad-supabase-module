@@ -1,0 +1,12 @@
+slug: personal
+name: 꿈해몽·사주·여행
+type: user
+status: draft
+db: supabase-a
+schema: nomad_personal
+tenancy: single-user
+owner_column: user_id
+tables: 5
+sensitive: false
+repos: []   # TODO: 연결된 GitHub 레포 이름을 채우세요
+created: 2026-11-13

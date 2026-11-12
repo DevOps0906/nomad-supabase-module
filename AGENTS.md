@@ -37,7 +37,8 @@
 | `README.md` | 파일 목록 · 제품과 플랜 · 범위 |
 | `docs/INTEGRATION.md` | 설치·기존 제품 통합 · 기능 이용권 계약 |
 | `docs/BACKUP_RESTORE.md` | 스키마 재현 · 데이터 복구 절차 |
-| `docs/diagrams/*.mmd` | ERD 등 (Mermaid) |
+| `docs/diagrams/*.mmd` | 전체 구조도 · RLS 흐름 · ERD (Mermaid) |
+| `docs/design/` · `blueprints/README.md` | 서비스 DB 설계 기획 · 서비스별 청사진(초안) |
 | `tasks/README.md` · `tasks/NOW.md` | 작업 표 · 현재 상태 |
 
 ## 6. 작업 방식
@@ -50,6 +51,7 @@
 |---|---|
 | `supabase/**` · `tests/**` | `.claude/rules/db.md` |
 | `docs/**` | `.claude/rules/docs.md` |
+| `blueprints/**` | `.claude/rules/blueprints.md` |
 - 읽지 않는 파일: `.env*` · lock 파일 · `node_modules/` · `.nomad/` (Claude는 `.claude/settings.json`, Gemini는 `.geminiignore`가 강제, ChatGPT Codex는 이 줄로 지킨다).
 - 도구별 설정: Claude Code `CLAUDE.md`·`.claude/` · ChatGPT Codex `.codex/config.toml` · Gemini CLI `.gemini/settings.json`·`.geminiignore`.
 - 새 규칙 파일을 추가하면 이 표에도 한 줄 추가한다.

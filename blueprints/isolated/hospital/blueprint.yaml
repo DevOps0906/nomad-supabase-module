@@ -1,0 +1,12 @@
+slug: hospital
+name: 병원 CRM
+type: isolated
+status: draft
+db: supabase-b
+schema: nomad_hospital
+tenancy: isolated
+owner_column: role
+tables: 5
+sensitive: true
+repos: []   # TODO: 연결된 GitHub 레포 이름을 채우세요
+created: 2026-11-13

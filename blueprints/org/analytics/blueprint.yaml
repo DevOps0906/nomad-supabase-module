@@ -1,0 +1,12 @@
+slug: analytics
+name: Analytics Flow
+type: org
+status: draft
+db: supabase-a
+schema: nomad_analytics
+tenancy: multi-tenant
+owner_column: organization_id
+tables: 7
+sensitive: false
+repos: []   # TODO: 연결된 GitHub 레포 이름을 채우세요
+created: 2026-11-13

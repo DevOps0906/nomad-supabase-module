@@ -1,0 +1,12 @@
+slug: humscore
+name: HumScore
+type: user
+status: draft
+db: supabase-a
+schema: nomad_humscore
+tenancy: single-user
+owner_column: user_id
+tables: 4
+sensitive: false
+repos: []   # TODO: 연결된 GitHub 레포 이름을 채우세요
+created: 2026-11-13
