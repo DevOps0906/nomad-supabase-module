@@ -16,3 +16,5 @@ create policy example_items_select_member on nomad_{{slug}}.example_items for se
 create policy example_items_insert_member on nomad_{{slug}}.example_items for insert with check (nomad_core.organization_role(organization_id) is not null);
 create policy example_items_update_member on nomad_{{slug}}.example_items for update using (nomad_core.organization_role(organization_id) is not null) with check (nomad_core.organization_role(organization_id) is not null);
 create policy example_items_delete_admin  on nomad_{{slug}}.example_items for delete using (nomad_core.organization_role(organization_id) in ('owner', 'admin'));
+
+grant select, insert, update, delete on all tables in schema nomad_{{slug}} to authenticated;

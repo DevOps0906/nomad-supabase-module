@@ -111,3 +111,5 @@ create policy share_links_insert_member on nomad_analytics.share_links for inser
 create policy share_links_update_member on nomad_analytics.share_links for update using (nomad_core.organization_role(organization_id) is not null) with check (nomad_core.organization_role(organization_id) is not null);
 create policy share_links_delete_admin on nomad_analytics.share_links for delete using (nomad_core.organization_role(organization_id) in ('owner', 'admin'));
 
+
+grant select, insert, update, delete on all tables in schema nomad_analytics to authenticated;

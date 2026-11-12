@@ -110,3 +110,5 @@ create policy uploads_insert_member on nomad_sceneflow.uploads for insert with c
 create policy uploads_update_member on nomad_sceneflow.uploads for update using (nomad_core.organization_role(organization_id) is not null) with check (nomad_core.organization_role(organization_id) is not null);
 create policy uploads_delete_admin on nomad_sceneflow.uploads for delete using (nomad_core.organization_role(organization_id) in ('owner', 'admin'));
 
+
+grant select, insert, update, delete on all tables in schema nomad_sceneflow to authenticated;

@@ -71,3 +71,5 @@ create table nomad_jangter.reviews (
 alter table nomad_jangter.reviews enable row level security;
 create policy reviews_own on nomad_jangter.reviews for all using (writer_id = auth.uid()) with check (writer_id = auth.uid());
 
+
+grant select, insert, update, delete on all tables in schema nomad_jangter to authenticated;

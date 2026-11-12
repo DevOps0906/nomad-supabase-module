@@ -13,3 +13,5 @@ create index idx_example_items_user_id on nomad_{{slug}}.example_items(user_id);
 alter table nomad_{{slug}}.example_items enable row level security;
 create policy example_items_own on nomad_{{slug}}.example_items
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+grant select, insert, update, delete on all tables in schema nomad_{{slug}} to authenticated;

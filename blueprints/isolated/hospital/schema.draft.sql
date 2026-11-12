@@ -55,3 +55,5 @@ create table nomad_hospital.audit_logs (
 alter table nomad_hospital.audit_logs enable row level security;
 -- TODO: 역할별 정책 작성 (현재 기본 거부)
 
+
+grant select, insert, update, delete on all tables in schema nomad_hospital to authenticated;

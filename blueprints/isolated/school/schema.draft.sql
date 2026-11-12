@@ -61,3 +61,5 @@ create table nomad_school.grades (
 alter table nomad_school.grades enable row level security;
 -- TODO: 역할별 정책 작성 (현재 기본 거부)
 
+
+grant select, insert, update, delete on all tables in schema nomad_school to authenticated;
