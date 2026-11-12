@@ -1,7 +1,7 @@
 slug: contentflow
 name: ContentFlow AI
 type: org
-status: draft
+status: migrated
 db: supabase-a
 schema: nomad_contentflow
 tenancy: multi-tenant

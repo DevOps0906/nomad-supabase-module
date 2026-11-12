@@ -1,7 +1,7 @@
 slug: analytics
 name: Analytics Flow
 type: org
-status: draft
+status: migrated
 db: supabase-a
 schema: nomad_analytics
 tenancy: multi-tenant
