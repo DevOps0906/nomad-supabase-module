@@ -41,6 +41,8 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 기능 이용권은 제품과 업체에 묶입니다. 운영자 권한 레코드는 업체 멤버십과 별도로 관리합니다. 운영자 레코드만으로 제품 고객 데이터의 RLS가 열리지 않습니다.
 
+service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블에 쓰기 전에 `nomad_core.org_has_feature(업체, 제품, 기능)`로 기능 이용권을 직접 확인해야 합니다(사용자 JWT가 없는 문맥용, service_role만 실행). 로그인 사용자 문맥에서는 `has_feature`를 씁니다. 구독이 없는 업체는 C 플랜으로 취급합니다.
+
 ## 결제 연결 계약
 
 - 결제 서버는 선택한 SKU의 제품·기능·가격을 서버의 결제 상품 설정으로 확인합니다. 웹훅 서명과 결제 상태 검증은 사용하게 될 결제사에 맞춰 구현합니다.
@@ -52,7 +54,7 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 로컬 Supabase에서 두 마이그레이션을 적용한 뒤 `tests/tenant_access.sql`을 로컬 DB에 실행합니다. 이 파일은 합성 데이터와 트랜잭션 롤백을 사용합니다. 실제 서비스 연결 시에는 앱에서 로그인한 세션으로 카탈로그 RPC와 Data API를 호출해 같은 결과를 확인합니다.
 
-개인형 제품은 개인 소유권에 맞춘 별도 업무 테이블을 사용합니다. 현재 업체 구독 테이블은 B2B용입니다. HumScore 개인 구독의 소유자를 명시하려면 별도 제품 설계로 추가합니다.
+개인형 제품(humscore·personal 등)의 업무 데이터는 `user_id`로 소유하고, 구독은 사용자가 owner인 조직(가입 시 생기는 1인 조직)에 둡니다. 유료 기능은 `nomad_core.user_has_feature`가 사용자가 owner인 활성 조직의 구독을 확인해 엽니다. 초대받은 멤버에게는 공유되지 않습니다. 기준표: [기능 카탈로그](design/01-architecture/feature-catalog.md).
 
 ## 서비스 청사진
 

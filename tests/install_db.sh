@@ -46,7 +46,7 @@ check "완료 문구 ✓" has '✓'
 cp "$T/supabase/nomad.lock" "$TMP/lock1"
 run "$T"
 expect_rc "재실행" 0
-check "재실행 후 파일 수 동일" test "$(ls "$M" | wc -l)" -eq 1
+check "재실행 후 파일 수 동일" test "$(ls "$M" | wc -l)" -eq 2
 check "재실행 '= ' 표시" has '^= '
 
 # 3. --check 최신
@@ -116,6 +116,16 @@ run "$T5" --product hospital
 expect_rc "--product hospital (확정 없음)" 64
 check "hospital 안내 문구" has '확정 마이그레이션 없음'
 check "hospital 실패 시 lock 없음" test ! -e "$T5/supabase/nomad.lock"
+
+# 8b. 부분 설치: --product humscore → humscore 2개 + core(기본 플랜 포함), 다른 제품 없음
+T9="$(mk_target t9)"; M9="$T9/supabase/migrations"
+run "$T9" --product humscore
+expect_rc "--product humscore 부분 설치" 0
+check "humscore 파일 2개(청사진+기능 잠금)" test "$(ls "$M9"/*_humscore.sql 2>/dev/null | wc -l)" -eq 2
+check "core 복사됨" test -n "$(ls "$M9"/*_nomad_core.sql 2>/dev/null)"
+check "core 기본 플랜 파일 복사됨" test -n "$(ls "$M9"/*_nomad_core_default_plan.sql 2>/dev/null)"
+check "다른 제품 파일 없음" test -z "$(ls "$M9" | grep -E '_(contentflow|flora|knowflow|classroom|analytics|sceneflow|commerce|jangter|baedal|personal)\.sql$')"
+check "총 4개 파일(core 2 + humscore 2)" test "$(ls "$M9" | wc -l)" -eq 4
 
 # 9. --with-example
 T6="$(mk_target t6)"

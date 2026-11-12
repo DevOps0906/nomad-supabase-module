@@ -159,7 +159,14 @@ insert into nomad_core.memberships values
  ('00000000-0000-4000-8000-00000000020a', '00000000-0000-4000-8000-0000000002a5', 'admin'),
  ('00000000-0000-4000-8000-00000000020a', '00000000-0000-4000-8000-0000000002a6', 'viewer');
 
-create temp table t_ids (slug text, org uuid, parent_id uuid, child_id uuid);
+-- 격리 검증용: 기능 잠금(구독 없음=C)을 배제하도록 모든 조직×제품에 A 플랜 활성 구독
+insert into nomad_core.subscriptions (organization_id, product_code, plan_code, status)
+select o.id, p.code, 'A', 'active'
+  from nomad_core.organizations o cross join nomad_core.products p
+ where o.id in ('00000000-0000-4000-8000-00000000020a', '00000000-0000-4000-8000-00000000020b', '00000000-0000-4000-8000-00000000020c')
+   and exists (select 1 from nomad_core.plans pl where pl.product_code = p.code and pl.code = 'A');
+
+create temp table t_ids(slug text, org uuid, parent_id uuid, child_id uuid);
 grant all on t_ids to authenticated;
 
 -- 2. 조직형 7개: 서비스별 대표 부모→자식 ------------------------------------
