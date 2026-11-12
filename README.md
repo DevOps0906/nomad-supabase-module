@@ -2,6 +2,10 @@
 
 여러 제품에서 재사용하는 Supabase DB 설계와 SQL입니다. GitHub에는 마이그레이션, 합성 테스트 데이터, 복구 절차를 보관합니다. 고객 데이터 백업은 별도 저장소에서 운영합니다.
 
+## 기획 폴더
+
+서비스별 DB 설계 기획(15개 프로젝트 초안, 유형 분류, 규칙)은 [`db-planning/`](db-planning/README.md)에 있습니다. 실제 마이그레이션과의 관계: [`db-planning/INTEGRATION.md`](db-planning/INTEGRATION.md)
+
 ## 시작하기
 
 | 파일 | 사용 목적 |

@@ -1,0 +1,13 @@
+slug: knowflow
+name: KNOWFLOW AI
+type: org
+account: DevOps0906
+status: draft
+db: supabase-a
+schema: knowflow
+tenancy: multi-tenant
+owner_column: org_id
+tables: 6
+sensitive: false
+repos: []   # TODO: 연결된 GitHub 레포 이름을 채우세요
+created: 2026-11-13

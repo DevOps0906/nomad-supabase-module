@@ -1,0 +1,107 @@
+# 프로젝트 레지스트리 — new-project.sh 가 자동으로 항목을 추가합니다.
+projects:
+  - slug: contentflow
+    name: ContentFlow AI
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/contentflow
+  - slug: flora
+    name: FLORA V2
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/flora
+  - slug: knowflow
+    name: KNOWFLOW AI
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/knowflow
+  - slug: classroom
+    name: Classroom
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/classroom
+  - slug: analytics
+    name: Analytics Flow
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/analytics
+  - slug: sceneflow
+    name: SceneFlow
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/sceneflow
+  - slug: commerce
+    name: 커머스 (셀러)
+    type: org
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/org/commerce
+  - slug: humscore
+    name: HumScore
+    type: user
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/user/humscore
+  - slug: jangter
+    name: 동네장터
+    type: user
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/user/jangter
+  - slug: baedal
+    name: 동네배달
+    type: user
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/user/baedal
+  - slug: personal
+    name: 꿈해몽·사주·여행
+    type: user
+    account: DevOps0906
+    status: draft
+    db: supabase-a
+    path: projects/user/personal
+  - slug: hospital
+    name: 병원 CRM
+    type: isolated
+    account: DevOps0906
+    status: draft
+    db: supabase-b
+    path: projects/isolated/hospital
+  - slug: school
+    name: 학교 관리
+    type: isolated
+    account: DevOps0906
+    status: draft
+    db: supabase-b
+    path: projects/isolated/school
+  - slug: motion
+    name: Motion · LTX
+    type: local
+    account: DevOps0906
+    status: draft
+    db: none
+    path: projects/local/motion
+  - slug: docs
+    name: 문서 · 모듈
+    type: local
+    account: DevOps0906
+    status: draft
+    db: none
+    path: projects/local/docs
