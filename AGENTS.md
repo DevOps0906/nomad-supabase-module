@@ -19,6 +19,7 @@
 | 로컬 DB 시작 | `npx supabase start` |
 | 마이그레이션 재적용 | `npx supabase db reset --local` (이 저장소 전용 디렉터리에서만) |
 | 접근 테스트 | `psql "<npx supabase status의 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql` |
+| 다른 저장소에 설치 | `bash scripts/install-db.sh <대상> [--product <slug>] [--with-accounts] [--check]` |
 | ERD 갱신 | `~/.claude/nomad/bin/sql2erd supabase/migrations -o docs/diagrams/erd.mmd` |
 긴 출력 명령은 `~/.claude/nomad/bin/q <명령>`으로 실행한다.
 

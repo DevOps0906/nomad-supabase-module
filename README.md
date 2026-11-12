@@ -10,6 +10,7 @@
 | `supabase/migrations/20261112000200_contentflow_example.sql` | ContentFlow 실습용 제품·플랜·업무 테이블 및 RLS |
 | `supabase/migrations/20261114000100_nomad_core_accounts.sql` | 가입 트리거·1인/팀 조직·초대·조직 크레딧 원장 |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
+| `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
 | `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감 검증 |
 | `tests/services_access.sql` | 서비스 11개의 RLS·권한·업체/사용자 격리 검증 |
