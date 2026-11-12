@@ -8,3 +8,12 @@ dumps/
 *.backup
 *.sql.gz
 node_modules/
+.nomad/
+!.env.example
+.next/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
