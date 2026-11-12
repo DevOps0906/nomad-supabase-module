@@ -2,10 +2,6 @@
 
 여러 제품에서 재사용하는 Supabase DB 설계와 SQL입니다. GitHub에는 마이그레이션, 합성 테스트 데이터, 복구 절차를 보관합니다. 고객 데이터 백업은 별도 저장소에서 운영합니다.
 
-## 기획 폴더
-
-서비스별 DB 설계 기획(15개 프로젝트 초안, 유형 분류, 규칙)은 [`db-planning/`](db-planning/README.md)에 있습니다. 실제 마이그레이션과의 관계: [`db-planning/INTEGRATION.md`](db-planning/INTEGRATION.md)
-
 ## 시작하기
 
 | 파일 | 사용 목적 |
@@ -15,6 +11,8 @@
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
 | [설치와 통합](docs/INTEGRATION.md) | 기존 제품에 가져오는 방법, 기능 이용권 계약 |
 | [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구의 절차 |
+| [`blueprints/`](blueprints/README.md) | 서비스별 DB 청사진 초안 (조직형 7 · 개인형 4 · 격리형 2) |
+| [`docs/design/`](docs/design/00-overview/principles.md) | 서비스 DB 설계 기획 (원칙 · 구조 · 규칙) |
 
 ContentFlow의 기존 운영 스키마와 구분하기 위해 예시 제품에는 `contentflow_example`이라는 키를 사용합니다. 공통 마이그레이션을 먼저 적용하고, 기존 제품을 연결할 때는 실습 마이그레이션 대신 제품 전용 마이그레이션을 작성합니다.
 

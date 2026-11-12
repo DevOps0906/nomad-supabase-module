@@ -53,3 +53,7 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 로컬 Supabase에서 두 마이그레이션을 적용한 뒤 `tests/tenant_access.sql`을 로컬 DB에 실행합니다. 이 파일은 합성 데이터와 트랜잭션 롤백을 사용합니다. 실제 서비스 연결 시에는 앱에서 로그인한 세션으로 카탈로그 RPC와 Data API를 호출해 같은 결과를 확인합니다.
 
 개인형 제품은 개인 소유권에 맞춘 별도 업무 테이블을 사용합니다. 현재 업체 구독 테이블은 B2B용입니다. HumScore 개인 구독의 소유자를 명시하려면 별도 제품 설계로 추가합니다.
+
+## 서비스 청사진
+
+연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮깁니다.

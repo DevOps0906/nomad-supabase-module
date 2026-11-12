@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph CORE[nomad_core · 공통 계정]
+    prof[profiles]
+    org[organizations]
+    mem[memberships]
+    sub[subscriptions]
+    feat[plans · features · 단품 이용권]
+  end
+  subgraph ORGS[조직형 7 · nomad_slug]
+    cf[contentflow]:::o
+    fl[flora]:::o
+    kf[knowflow]:::o
+    cr[classroom]:::o
+    an[analytics]:::o
+    sc[sceneflow]:::o
+    cm[commerce]:::o
+  end
+  subgraph USRS[개인형 4 · nomad_slug]
+    hs[humscore]:::u
+    jt[jangter]:::u
+    bd[baedal]:::u
+    ps[personal]:::u
+  end
+  subgraph ISO[격리형 2 · 별도 프로젝트]
+    hp[hospital]:::s
+    sh[school]:::s
+  end
+  ORGS --> org
+  USRS --> prof
+  classDef o fill:#e6f0ff,stroke:#3b6fd4
+  classDef u fill:#e8f7ec,stroke:#2f9e5a
+  classDef s fill:#fdeaea,stroke:#d44

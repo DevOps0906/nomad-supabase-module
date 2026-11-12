@@ -1,0 +1,80 @@
+# 서비스 청사진 레지스트리 — scripts/new-blueprint.sh 가 자동으로 항목을 추가합니다.
+projects:
+  - slug: contentflow
+    name: ContentFlow AI
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/contentflow
+  - slug: flora
+    name: FLORA V2
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/flora
+  - slug: knowflow
+    name: KNOWFLOW AI
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/knowflow
+  - slug: classroom
+    name: Classroom
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/classroom
+  - slug: analytics
+    name: Analytics Flow
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/analytics
+  - slug: sceneflow
+    name: SceneFlow
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/sceneflow
+  - slug: commerce
+    name: 커머스 (셀러)
+    type: org
+    status: draft
+    db: supabase-a
+    path: blueprints/org/commerce
+  - slug: humscore
+    name: HumScore
+    type: user
+    status: draft
+    db: supabase-a
+    path: blueprints/user/humscore
+  - slug: jangter
+    name: 동네장터
+    type: user
+    status: draft
+    db: supabase-a
+    path: blueprints/user/jangter
+  - slug: baedal
+    name: 동네배달
+    type: user
+    status: draft
+    db: supabase-a
+    path: blueprints/user/baedal
+  - slug: personal
+    name: 꿈해몽·사주·여행
+    type: user
+    status: draft
+    db: supabase-a
+    path: blueprints/user/personal
+  - slug: hospital
+    name: 병원 CRM
+    type: isolated
+    status: draft
+    db: supabase-b
+    path: blueprints/isolated/hospital
+  - slug: school
+    name: 학교 관리
+    type: isolated
+    status: draft
+    db: supabase-b
+    path: blueprints/isolated/school

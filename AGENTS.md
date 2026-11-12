@@ -40,6 +40,7 @@
 | `docs/00_LEAN.md` | 린 검증 결과 |
 | `docs/01_PRD.md` ~ `05_DATA_MODEL.md` | 기획 · 구조 · 화면 · API · 데이터 |
 | `docs/diagrams/*.mmd` | 구조도 · 흐름도 · ERD (Mermaid) |
+| `docs/design/` · `blueprints/README.md` | 서비스 DB 설계 기획 · 서비스별 청사진(초안) |
 | `DESIGN.md` · `apps/web/src/styles/tokens.css` | 디자인 (정답은 토큰 파일) |
 | `tasks/README.md` · `tasks/NOW.md` | 작업 표 · 현재 상태 |
 
@@ -55,6 +56,7 @@
 | `apps/api/**` | `.claude/rules/api.md` |
 | `supabase/**` | `.claude/rules/db.md` |
 | `docs/**` · `DESIGN.md` | `.claude/rules/docs.md` |
+| `blueprints/**` | `.claude/rules/blueprints.md` |
 - 읽지 않는 파일: `.env*` · lock 파일 · `node_modules/` · `.next/` · `dist/` · `build/` · `coverage/` (Claude는 `.claude/settings.json`, Gemini는 `.geminiignore`가 강제, ChatGPT Codex는 이 줄로 지킨다).
 - 도구별 설정: Claude Code `CLAUDE.md`·`.claude/` · ChatGPT Codex `.codex/config.toml` · Gemini CLI `.gemini/settings.json`·`.geminiignore`.
 - 새 규칙 파일을 추가하면 이 표에도 한 줄 추가한다.
