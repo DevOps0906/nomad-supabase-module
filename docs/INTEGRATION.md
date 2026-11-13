@@ -26,6 +26,26 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 [Supabase 마이그레이션](https://supabase.com/docs/guides/deployment/database-migrations) · [커스텀 스키마](https://supabase.com/docs/guides/api/using-custom-schemas)
 
+## 상태 값 사전 점검
+
+`20261117000101`~`107` 파일(contentflow·flora·knowflow·classroom·sceneflow·commerce)은 상태·종류 컬럼 8개에 not null·값 목록 check·기본값을 붙입니다. 허용 값은 각 파일의 check 식이 정본입니다. 기존 행은 바꾸지 않으며, null이나 목록 밖 값이 있으면 파일 맨 앞 점검에서 `테이블.컬럼 … 'done' 1건` 형식의 오류로 중단합니다.
+
+1. 적용 전, 설치한 제품의 스키마만 남기고 아래를 실행해 위반 행을 셉니다(결과가 없으면 통과).
+   ```sql
+   select 'nomad_contentflow.blog_members.role' as col, role as val, count(*) from nomad_contentflow.blog_members where role is null or role not in ('owner','editor','viewer') group by role
+   union all select 'nomad_flora.pipeline_runs.status', status, count(*) from nomad_flora.pipeline_runs where status is null or status not in ('queued','running','succeeded','failed','cancelled') group by status
+   union all select 'nomad_knowflow.messages.role', role, count(*) from nomad_knowflow.messages where role is null or role not in ('user','assistant') group by role
+   union all select 'nomad_classroom.materials.kind', kind, count(*) from nomad_classroom.materials where kind is null or kind not in ('document','video','link','image') group by kind
+   union all select 'nomad_sceneflow.edit_jobs.kind', kind, count(*) from nomad_sceneflow.edit_jobs where kind is null or kind not in ('cut','subtitle','render') group by kind
+   union all select 'nomad_sceneflow.edit_jobs.status', status, count(*) from nomad_sceneflow.edit_jobs where status is null or status not in ('queued','running','succeeded','failed','cancelled') group by status
+   union all select 'nomad_commerce.automation_jobs.status', status, count(*) from nomad_commerce.automation_jobs where status is null or status not in ('queued','running','succeeded','failed','cancelled') group by status
+   union all select 'nomad_commerce.orders.status', status, count(*) from nomad_commerce.orders where status is null or status not in ('pending','paid','shipped','delivered','cancelled','refunded') group by status;
+   ```
+2. 위반 행은 업무 담당자가 실제 상태를 확인해 직접 고칩니다. null을 `queued`·`pending`으로 일괄 채우면 끝난 작업·결제가 다시 처리될 수 있으므로 자동으로 채우지 않습니다.
+3. 실패 시: 파일 하나는 한 트랜잭션이라 실패한 파일은 아무것도 바뀌지 않지만, 앞 번호 제품 파일은 이미 적용되어 있을 수 있습니다. 위반 행을 정리한 뒤 같은 명령(`npx supabase db push`)을 다시 실행하면 남은 파일부터 이어서 적용됩니다.
+4. 적용 전 앱·워커 코드를 확인합니다. 이 컬럼들에 null을 넣거나 `status is null`로 신규 작업을 찾던 코드는 적용 후 오류가 나거나 조건이 어긋납니다. 생략하면 작업 status는 `queued`, 주문은 `pending`, 블로그 역할은 `editor`가 됩니다. `knowflow.messages.role`은 기본값이 없으므로 AI 응답을 저장하는 워커는 `role = 'assistant'`를 반드시 넘깁니다.
+5. `alter table`은 대상 테이블에 ACCESS EXCLUSIVE 잠금을 걸고 check 검증 동안 전체 행을 읽습니다. 행이 많은 테이블(주문·메시지 등)은 사용량이 적은 시간대에 적용합니다.
+
 ## 대시보드와 기능 이용권
 
 | 조건 | 처리 |

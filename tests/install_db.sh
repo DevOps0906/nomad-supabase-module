@@ -108,6 +108,11 @@ run "$T4" --product contentflow
 expect_rc "--product contentflow" 0
 check "contentflow 복사됨" test -n "$(ls "$M4"/*_contentflow.sql 2>/dev/null)"
 check "flags에 --product contentflow" grep -q '^# flags.*--product contentflow' "$T4/supabase/nomad.lock"
+check "contentflow 파일 3개(청사진+기능 잠금+상태 값)" test "$(ls "$M4"/*_contentflow.sql 2>/dev/null | wc -l)" -eq 3
+check "contentflow 상태 값 파일 복사됨" test -f "$M4/20261117000101_contentflow.sql"
+check "다른 제품 상태 값 파일 없음" test -z "$(ls "$M4" | grep -E '^20261117.*_(flora|knowflow|classroom|sceneflow|commerce)\.sql$')"
+check "다른 제품 파일 없음(contentflow)" test -z "$(ls "$M4" | grep -E '_(flora|knowflow|classroom|analytics|sceneflow|commerce|humscore|jangter|baedal|personal)\.sql$')"
+check "core 복사됨(contentflow)" test -n "$(ls "$M4"/*_nomad_core.sql 2>/dev/null)"
 rm -f "$M4"/*_contentflow.sql
 run "$T4"
 check "제품 기록 재실행 때 유지" test -n "$(ls "$M4"/*_contentflow.sql 2>/dev/null)"

@@ -1,5 +1,5 @@
 -- 서비스 11개 마이그레이션(nomad_<slug>) 격리·권한 검증 (합성 데이터, 롤백)
--- 1 카탈로그 · 2 조직형 7개 대표 테이블 · 3 jangter 두 당사자 · 4 baedal 두 당사자 · 5 classroom 학생 기록
+-- 1 카탈로그 · 2 조직형 7개 대표 테이블 · 3 jangter 두 당사자 · 4 baedal 두 당사자 · 5 classroom 학생 기록 · 7 상태·종류 값 목록
 \o /dev/null
 begin;
 
@@ -501,6 +501,8 @@ begin
   perform pg_temp.as_user(alice);
   perform pg_temp.expect_err(format('insert into nomad_contentflow.blog_members (organization_id, blog_id, user_id) values (%L, %L, %L)', a, blog, '00000000-0000-4000-8000-0000000002b1'), '%foreign key%');
   execute format('insert into nomad_contentflow.blog_members (organization_id, blog_id, user_id) values (%L, %L, %L)', a, blog, carol);
+  if (select role from nomad_contentflow.blog_members where blog_id = blog and user_id = carol) is distinct from 'editor'
+  then raise exception 'blog_members.role default is not editor'; end if;
 
   -- knowflow: 비공개 space는 owner/admin만, 개인 대화는 본인만, messages insert는 role=user만
   insert into nomad_knowflow.spaces (organization_id, name, visibility) values (a, '비공개', 'private') returning id into prv;
@@ -548,6 +550,47 @@ begin
   if tok is null or length(tok) <> 48 then raise exception 'share token not issued by default'; end if;
   perform pg_temp.expect_err(format('insert into nomad_analytics.share_links (organization_id, dashboard_id, token) values (%L, %L, ''mine'')', a, dash), '%permission denied%');
   perform pg_temp.expect_err('update nomad_analytics.share_links set token = ''mine''', '%permission denied%');
+end;
+$$;
+
+-- 7. 상태·종류 값 목록(task-005): 목록 밖 값 거부 · 명시적 null 거부 · 생략 시 기본값 --------
+reset role;
+do $$
+declare
+  a uuid := '00000000-0000-4000-8000-00000000020a';
+  alice uuid := '00000000-0000-4000-8000-0000000002a1';
+  blog uuid; chat uuid;
+  v record; got text;
+begin
+  select parent_id into blog from t_ids where slug = 'contentflow' and org = a;
+  insert into nomad_knowflow.chats (organization_id, title) values (a, '상태 값 검사') returning id into chat;
+
+  -- (테이블, 컬럼, 추가 컬럼, 추가 값, 기본값 — null이면 기본값 없음)
+  for v in select * from (values
+    ('nomad_contentflow.blog_members', 'role', 'blog_id, user_id, ', format('%L, %L, ', blog, alice), 'editor'),
+    ('nomad_flora.pipeline_runs', 'status', '', '', 'queued'),
+    ('nomad_knowflow.messages', 'role', 'chat_id, ', format('%L, ', chat), null),
+    ('nomad_classroom.materials', 'kind', '', '', 'document'),
+    ('nomad_sceneflow.edit_jobs', 'kind', '', '', 'cut'),
+    ('nomad_sceneflow.edit_jobs', 'status', '', '', 'queued'),
+    ('nomad_commerce.automation_jobs', 'status', '', '', 'queued'),
+    ('nomad_commerce.orders', 'status', 'total, ', '0, ', 'pending')
+  ) as t(tbl, col, xcols, xvals, dflt)
+  loop
+    perform pg_temp.expect_err(format('insert into %s (organization_id, %s%I) values (%L, %s''bogus'')', v.tbl, v.xcols, v.col, a, v.xvals),
+      '%violates check constraint "' || split_part(v.tbl, '.', 2) || '_' || v.col || '_check"%');
+    perform pg_temp.expect_err(format('insert into %s (organization_id, %s%I) values (%L, %snull)', v.tbl, v.xcols, v.col, a, v.xvals),
+      '%null value in column "' || v.col || '"%not-null%');
+    if v.dflt is null then
+      perform pg_temp.expect_err(format('insert into %s (organization_id, %s) values (%L, %s)', v.tbl, rtrim(v.xcols, ', '), a, rtrim(v.xvals, ', ')),
+        '%null value in column "' || v.col || '"%not-null%');
+    else
+      execute format('insert into %s (organization_id%s) values (%L%s) returning %I', v.tbl,
+        case when v.xcols = '' then '' else ', ' || rtrim(v.xcols, ', ') end, a,
+        case when v.xvals = '' then '' else ', ' || rtrim(v.xvals, ', ') end, v.col) into got;
+      if got is distinct from v.dflt then raise exception '%.% default: got %, want %', v.tbl, v.col, got, v.dflt; end if;
+    end if;
+  end loop;
 end;
 $$;
 
