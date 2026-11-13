@@ -20,3 +20,5 @@ create table nomad_{{slug}}.audit_logs (
 alter table nomad_{{slug}}.staff      enable row level security;
 alter table nomad_{{slug}}.audit_logs enable row level security;
 -- TODO: 역할별 정책 작성 (기본 거부 상태)
+
+grant select, insert, update, delete on all tables in schema nomad_{{slug}} to authenticated;

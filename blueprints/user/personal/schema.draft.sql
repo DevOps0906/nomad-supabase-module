@@ -58,3 +58,5 @@ create table nomad_personal.trip_days (
 alter table nomad_personal.trip_days enable row level security;
 create policy trip_days_own_via_trips on nomad_personal.trip_days for all using (exists (select 1 from nomad_personal.trips p where p.id = trip_id and (p.user_id = auth.uid())));
 
+
+grant select, insert, update, delete on all tables in schema nomad_personal to authenticated;

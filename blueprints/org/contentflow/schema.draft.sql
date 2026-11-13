@@ -97,3 +97,5 @@ create policy reviews_insert_member on nomad_contentflow.reviews for insert with
 create policy reviews_update_member on nomad_contentflow.reviews for update using (nomad_core.organization_role(organization_id) is not null) with check (nomad_core.organization_role(organization_id) is not null);
 create policy reviews_delete_admin on nomad_contentflow.reviews for delete using (nomad_core.organization_role(organization_id) in ('owner', 'admin'));
 
+
+grant select, insert, update, delete on all tables in schema nomad_contentflow to authenticated;

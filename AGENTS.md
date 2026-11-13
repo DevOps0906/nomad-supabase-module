@@ -19,6 +19,7 @@
 | 로컬 DB 시작 | `npx supabase start` |
 | 마이그레이션 재적용 | `npx supabase db reset --local` (이 저장소 전용 디렉터리에서만) |
 | 접근 테스트 | `psql "<npx supabase status의 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql` |
+| 다른 저장소에 설치 | `bash scripts/install-db.sh <대상> [--product <slug>] [--with-accounts] [--check]` |
 | ERD 갱신 | `~/.claude/nomad/bin/sql2erd supabase/migrations -o docs/diagrams/erd.mmd` |
 긴 출력 명령은 `~/.claude/nomad/bin/q <명령>`으로 실행한다.
 
@@ -27,7 +28,7 @@
 - 모든 테이블 RLS. 적용된 마이그레이션 파일은 수정하지 않고 새 번호 파일로 추가한다.
 - 공통 스키마는 `nomad_core`, 제품 스키마는 제품 키로 분리한다. 실습 예시 키는 `contentflow_example`(운영 ContentFlow와 섞지 않는다).
 - `security definer` 함수는 `set search_path = ''`와 스키마 한정 이름을 쓴다. 권한은 `authenticated`·`service_role`에 필요한 만큼만 grant.
-- 업체 간 격리·기능 잠금을 바꾼 작업은 `tests/tenant_access.sql`에 검증을 추가하고 통과시킨다.
+- 업체 간 격리·기능 잠금을 바꾼 작업은 `tests/`의 해당 검증(core `tenant_access.sql` · 서비스 `services_access.sql` · 잠금 `feature_gating.sql`)에 추가하고 통과시킨다.
 - 금액은 정수(원). 결제·차감 요청에는 멱등 키.
 - 문서·커밋·주석 문구는 한국어, SQL 식별자는 영어.
 

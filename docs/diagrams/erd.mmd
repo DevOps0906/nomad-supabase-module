@@ -1,0 +1,657 @@
+erDiagram
+  profiles {
+    uuid user_id PK,FK
+    text display_name
+    text locale
+    timestamptz created_at
+  }
+  products {
+    uuid id PK
+    uuid organization_id FK
+    uuid item_id
+    text title
+    text detail_page
+    bigint price
+    timestamptz created_at
+  }
+  organizations {
+    uuid id PK
+    uuid created_by FK
+    text name
+    boolean active
+    timestamptz created_at
+  }
+  memberships {
+    uuid organization_id PK,FK
+    uuid user_id PK,FK
+    text role
+  }
+  platform_admins {
+    uuid user_id PK,FK
+    text scope
+    boolean active
+  }
+  plans {
+    text product_code PK,FK
+    text code PK
+    text name
+  }
+  features {
+    text product_code PK,FK
+    text code PK
+    text name
+  }
+  plan_features {
+    text product_code PK
+    text plan_code PK
+    text feature_code PK
+  }
+  subscriptions {
+    uuid organization_id PK,FK
+    text product_code PK
+    text plan_code
+    text status
+    timestamptz starts_at
+    timestamptz ends_at
+  }
+  addon_products {
+    text product_code PK
+    text sku PK
+    text feature_code
+    boolean for_sale
+  }
+  addon_purchases {
+    uuid id PK
+    uuid organization_id FK
+    text product_code
+    text sku
+    text feature_code
+    text provider
+    text provider_purchase_id
+    text status
+    timestamptz created_at
+  }
+  feature_grants {
+    uuid id PK
+    uuid organization_id FK
+    text product_code
+    text feature_code
+    uuid purchase_id
+    text source
+    timestamptz starts_at
+    timestamptz expires_at
+    timestamptz revoked_at
+  }
+  posts {
+    uuid id PK
+    uuid organization_id FK
+    uuid author_id FK
+    uuid topic_id
+    text status
+    text body
+    timestamptz created_at
+  }
+  analytics_reports {
+    uuid id PK
+    uuid organization_id FK
+    text title
+    jsonb report
+  }
+  invitations {
+    uuid id PK
+    uuid organization_id FK
+    uuid invited_by FK
+    uuid accepted_by FK
+    text email
+    text role
+    text token
+    timestamptz expires_at
+    timestamptz accepted_at
+    timestamptz created_at
+  }
+  credit_ledger {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid created_by FK
+    int delta
+    text reason
+    text idempotency_key
+    timestamptz created_at
+  }
+  blogs {
+    uuid id PK
+    uuid organization_id FK
+    text name
+    text platform
+    text tone
+    timestamptz created_at
+  }
+  topics {
+    uuid id PK
+    uuid organization_id FK
+    uuid blog_id
+    text keyword
+    text status
+    timestamptz created_at
+  }
+  blog_members {
+    uuid organization_id PK,FK
+    uuid blog_id PK
+    uuid user_id PK
+    text role
+  }
+  publish_logs {
+    uuid id PK
+    uuid organization_id FK
+    uuid post_id
+    uuid blog_id
+    text url
+    timestamptz published_at
+    timestamptz created_at
+  }
+  reviews {
+    uuid id PK
+    uuid order_id FK
+    uuid writer_id FK
+    int rating
+    timestamptz created_at
+  }
+  personas {
+    uuid id PK
+    uuid organization_id FK
+    text name
+    text writing_dna
+    timestamptz created_at
+  }
+  projects {
+    uuid id PK
+    uuid organization_id FK
+    text title
+    text aspect
+    text resolution
+    timestamptz created_at
+  }
+  chapters {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    numeric step
+    text body
+    timestamptz created_at
+  }
+  assets {
+    uuid id PK
+    uuid organization_id FK
+    text kind
+    text storage_path
+    timestamptz created_at
+  }
+  pipeline_runs {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    text mode
+    text status
+    timestamptz created_at
+  }
+  audiobooks {
+    uuid id PK
+    uuid organization_id FK
+    uuid chapter_id
+    text voice
+    text file_path
+    timestamptz created_at
+  }
+  spaces {
+    uuid id PK
+    uuid organization_id FK
+    text name
+    text visibility
+    timestamptz created_at
+  }
+  sources {
+    uuid id PK
+    uuid organization_id FK
+    uuid space_id
+    text kind
+    text url
+    text status
+    timestamptz created_at
+  }
+  chunks {
+    uuid id PK
+    uuid organization_id FK
+    uuid source_id
+    text text
+    vector embedding
+    timestamptz created_at
+  }
+  reports {
+    uuid id PK
+    uuid organization_id FK
+    uuid run_id
+    text format
+    text file_path
+    timestamptz created_at
+  }
+  chats {
+    uuid id PK
+    uuid organization_id FK
+    uuid user_id FK
+    uuid space_id
+    text title
+    timestamptz created_at
+  }
+  messages {
+    uuid id PK
+    uuid room_id FK
+    uuid sender_id FK
+    text body
+    timestamptz sent_at
+    timestamptz created_at
+  }
+  courses {
+    uuid id PK
+    uuid organization_id FK
+    text title
+    text subject
+    timestamptz created_at
+  }
+  sessions {
+    uuid id PK
+    uuid organization_id FK
+    uuid course_id
+    timestamptz starts_at
+    timestamptz open_at
+    timestamptz created_at
+  }
+  materials {
+    uuid id PK
+    uuid organization_id FK
+    uuid session_id
+    text kind
+    text file_path
+    timestamptz created_at
+  }
+  enrollments {
+    uuid id PK
+    uuid organization_id FK
+    uuid course_id
+    uuid student_id
+    text role
+    timestamptz created_at
+  }
+  assessments {
+    uuid id PK
+    uuid organization_id FK
+    uuid course_id
+    text phase
+    timestamptz created_at
+  }
+  quiz_items {
+    uuid id PK
+    uuid organization_id FK
+    numeric level
+    numeric views
+    boolean is_hidden
+    timestamptz created_at
+  }
+  quiz_attempts {
+    uuid id PK
+    uuid organization_id FK
+    uuid student_id FK
+    numeric level
+    int score
+    timestamptz created_at
+  }
+  datasets {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    text file_path
+    jsonb rows
+    jsonb schema_json
+    timestamptz created_at
+  }
+  analysis_runs {
+    uuid id PK
+    uuid organization_id FK
+    uuid dataset_id
+    numeric step
+    jsonb result_json
+    timestamptz created_at
+  }
+  dashboards {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    text name
+    jsonb layout_json
+    timestamptz created_at
+  }
+  widgets {
+    uuid id PK
+    uuid organization_id FK
+    uuid dashboard_id
+    text type
+    jsonb query_json
+    timestamptz created_at
+  }
+  share_links {
+    uuid id PK
+    uuid organization_id FK
+    uuid dashboard_id
+    text token
+    timestamptz expires_at
+    timestamptz created_at
+  }
+  scenes {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    text position
+    text script
+    uuid asset_id
+    timestamptz created_at
+  }
+  edit_jobs {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    text kind
+    text status
+    timestamptz created_at
+  }
+  render_jobs {
+    uuid id PK
+    uuid organization_id FK
+    uuid project_id
+    text engine
+    text queue
+    timestamptz created_at
+  }
+  channels {
+    uuid id PK
+    uuid organization_id FK
+    text platform
+    text token_ref
+    timestamptz created_at
+  }
+  uploads {
+    uuid id PK
+    uuid organization_id FK
+    uuid render_id
+    uuid channel_id
+    timestamptz scheduled_at
+    timestamptz created_at
+  }
+  sourcing_items {
+    uuid id PK
+    uuid organization_id FK
+    text source
+    text source_url
+    bigint cost
+    timestamptz created_at
+  }
+  marketplace_accounts {
+    uuid id PK
+    uuid organization_id FK
+    text marketplace
+    text token_ref
+    timestamptz created_at
+  }
+  listings {
+    uuid id PK
+    uuid seller_id FK
+    text title
+    bigint price
+    text status
+    text dong
+    timestamptz created_at
+  }
+  automation_jobs {
+    uuid id PK
+    uuid organization_id FK
+    text kind
+    numeric credits_used
+    text status
+    timestamptz created_at
+  }
+  orders {
+    uuid id PK
+    uuid buyer_id FK
+    uuid store_id FK
+    text status
+    bigint total
+    text idempotency_key
+    timestamptz created_at
+  }
+  scores {
+    uuid id PK
+    uuid user_id FK
+    text title
+    text key
+    jsonb notation_json
+    uuid workspace_id
+    timestamptz created_at
+  }
+  recordings {
+    uuid id PK
+    uuid user_id FK
+    uuid score_id
+    text audio_path
+    numeric duration
+    timestamptz created_at
+  }
+  settings {
+    uuid user_id PK,FK
+    text instrument
+    text default_key
+  }
+  exports {
+    uuid id PK
+    uuid user_id FK
+    uuid score_id
+    text format
+    text file_path
+    timestamptz created_at
+  }
+  listing_photos {
+    uuid id PK
+    uuid listing_id FK
+    text storage_path
+    text position
+    timestamptz created_at
+  }
+  favorites {
+    uuid user_id PK,FK
+    uuid listing_id PK,FK
+    timestamptz created_at
+  }
+  chat_rooms {
+    uuid id PK
+    uuid listing_id FK
+    uuid buyer_id FK
+    uuid seller_id FK
+    timestamptz created_at
+  }
+  stores {
+    uuid id PK
+    uuid owner_id FK
+    text name
+    text category
+    text open_hours
+    timestamptz created_at
+  }
+  menus {
+    uuid id PK
+    uuid store_id FK
+    text name
+    bigint price
+    jsonb options
+    timestamptz created_at
+  }
+  order_items {
+    uuid id PK
+    uuid order_id FK
+    uuid menu_id FK
+    int qty
+    timestamptz created_at
+  }
+  deliveries {
+    uuid id PK
+    uuid order_id FK
+    uuid rider_id FK
+    text status
+    text eta
+    timestamptz created_at
+  }
+  readings {
+    uuid id PK
+    uuid user_id FK
+    text kind
+    jsonb input_json
+    text result_md
+    timestamptz created_at
+  }
+  saved_reports {
+    uuid id PK
+    uuid user_id FK
+    uuid reading_id
+    text pdf_path
+    timestamptz created_at
+  }
+  birth_profiles {
+    uuid user_id PK,FK
+    date birth_date
+    text birth_time
+    text gender
+  }
+  trips {
+    uuid id PK
+    uuid user_id FK
+    text title
+    date start_date
+    date end_date
+    timestamptz created_at
+  }
+  trip_days {
+    uuid id PK
+    uuid trip_id FK
+    text day
+    jsonb plan_json
+    jsonb tools
+    timestamptz created_at
+  }
+  organizations ||--o{ memberships : "organization_id"
+  products ||--o{ plans : "product_code"
+  products ||--o{ features : "product_code"
+  plans ||--o{ plan_features : "product_code"
+  features ||--o{ plan_features : "product_code"
+  organizations ||--o{ subscriptions : "organization_id"
+  plans ||--o{ subscriptions : "product_code"
+  features ||--o{ addon_products : "product_code"
+  organizations ||--o{ addon_purchases : "organization_id"
+  addon_products ||--o{ addon_purchases : "product_code"
+  organizations ||--o{ feature_grants : "organization_id"
+  features ||--o{ feature_grants : "product_code"
+  addon_purchases ||--o{ feature_grants : "purchase_id"
+  organizations ||--o{ posts : "organization_id"
+  organizations ||--o{ analytics_reports : "organization_id"
+  organizations ||--o{ invitations : "organization_id"
+  organizations ||--o{ credit_ledger : "organization_id"
+  products ||--o{ credit_ledger : "product_code"
+  organizations ||--o{ blogs : "organization_id"
+  organizations ||--o{ topics : "organization_id"
+  blogs ||--o{ topics : "organization_id"
+  topics ||--o{ posts : "organization_id"
+  organizations ||--o{ blog_members : "organization_id"
+  blogs ||--o{ blog_members : "organization_id"
+  memberships ||--o{ blog_members : "organization_id"
+  organizations ||--o{ publish_logs : "organization_id"
+  posts ||--o{ publish_logs : "organization_id"
+  blogs ||--o{ publish_logs : "organization_id"
+  organizations ||--o{ reviews : "organization_id"
+  posts ||--o{ reviews : "organization_id"
+  organizations ||--o{ personas : "organization_id"
+  organizations ||--o{ projects : "organization_id"
+  personas ||--o{ projects : "organization_id"
+  organizations ||--o{ chapters : "organization_id"
+  projects ||--o{ chapters : "organization_id"
+  organizations ||--o{ assets : "organization_id"
+  chapters ||--o{ assets : "organization_id"
+  organizations ||--o{ pipeline_runs : "organization_id"
+  projects ||--o{ pipeline_runs : "organization_id"
+  organizations ||--o{ audiobooks : "organization_id"
+  chapters ||--o{ audiobooks : "organization_id"
+  organizations ||--o{ spaces : "organization_id"
+  organizations ||--o{ sources : "organization_id"
+  spaces ||--o{ sources : "organization_id"
+  organizations ||--o{ chunks : "organization_id"
+  sources ||--o{ chunks : "organization_id"
+  organizations ||--o{ reports : "organization_id"
+  spaces ||--o{ reports : "organization_id"
+  organizations ||--o{ chats : "organization_id"
+  spaces ||--o{ chats : "organization_id"
+  organizations ||--o{ messages : "organization_id"
+  chats ||--o{ messages : "organization_id"
+  organizations ||--o{ courses : "organization_id"
+  organizations ||--o{ sessions : "organization_id"
+  courses ||--o{ sessions : "organization_id"
+  organizations ||--o{ materials : "organization_id"
+  sessions ||--o{ materials : "organization_id"
+  organizations ||--o{ enrollments : "organization_id"
+  courses ||--o{ enrollments : "organization_id"
+  memberships ||--o{ enrollments : "organization_id"
+  organizations ||--o{ assessments : "organization_id"
+  courses ||--o{ assessments : "organization_id"
+  organizations ||--o{ quiz_items : "organization_id"
+  organizations ||--o{ quiz_attempts : "organization_id"
+  organizations ||--o{ datasets : "organization_id"
+  projects ||--o{ datasets : "organization_id"
+  organizations ||--o{ analysis_runs : "organization_id"
+  datasets ||--o{ analysis_runs : "organization_id"
+  organizations ||--o{ dashboards : "organization_id"
+  projects ||--o{ dashboards : "organization_id"
+  organizations ||--o{ widgets : "organization_id"
+  dashboards ||--o{ widgets : "organization_id"
+  analysis_runs ||--o{ reports : "organization_id"
+  organizations ||--o{ share_links : "organization_id"
+  dashboards ||--o{ share_links : "organization_id"
+  organizations ||--o{ scenes : "organization_id"
+  projects ||--o{ scenes : "organization_id"
+  assets ||--o{ scenes : "organization_id"
+  organizations ||--o{ edit_jobs : "organization_id"
+  projects ||--o{ edit_jobs : "organization_id"
+  organizations ||--o{ render_jobs : "organization_id"
+  projects ||--o{ render_jobs : "organization_id"
+  organizations ||--o{ channels : "organization_id"
+  organizations ||--o{ uploads : "organization_id"
+  render_jobs ||--o{ uploads : "organization_id"
+  channels ||--o{ uploads : "organization_id"
+  organizations ||--o{ sourcing_items : "organization_id"
+  organizations ||--o{ products : "organization_id"
+  sourcing_items ||--o{ products : "organization_id"
+  organizations ||--o{ marketplace_accounts : "organization_id"
+  organizations ||--o{ listings : "organization_id"
+  products ||--o{ listings : "organization_id"
+  marketplace_accounts ||--o{ listings : "organization_id"
+  organizations ||--o{ automation_jobs : "organization_id"
+  organizations ||--o{ orders : "organization_id"
+  listings ||--o{ orders : "organization_id"
+  scores ||--o{ recordings : "user_id"
+  scores ||--o{ exports : "user_id"
+  listings ||--o{ listing_photos : "listing_id"
+  listings ||--o{ favorites : "listing_id"
+  listings ||--o{ chat_rooms : "listing_id"
+  chat_rooms ||--o{ messages : "room_id"
+  chat_rooms ||--o{ reviews : "room_id"
+  stores ||--o{ menus : "store_id"
+  stores ||--o{ orders : "store_id"
+  orders ||--o{ reviews : "order_id"
+  orders ||--o{ order_items : "order_id"
+  menus ||--o{ order_items : "menu_id"
+  orders ||--o{ deliveries : "order_id"
+  readings ||--o{ saved_reports : "user_id"
+  trips ||--o{ trip_days : "trip_id"

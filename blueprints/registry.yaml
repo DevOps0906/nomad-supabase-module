@@ -3,67 +3,67 @@ projects:
   - slug: contentflow
     name: ContentFlow AI
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/contentflow
   - slug: flora
     name: FLORA V2
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/flora
   - slug: knowflow
     name: KNOWFLOW AI
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/knowflow
   - slug: classroom
     name: Classroom
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/classroom
   - slug: analytics
     name: Analytics Flow
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/analytics
   - slug: sceneflow
     name: SceneFlow
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/sceneflow
   - slug: commerce
     name: 커머스 (셀러)
     type: org
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/org/commerce
   - slug: humscore
     name: HumScore
     type: user
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/user/humscore
   - slug: jangter
     name: 동네장터
     type: user
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/user/jangter
   - slug: baedal
     name: 동네배달
     type: user
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/user/baedal
   - slug: personal
     name: 꿈해몽·사주·여행
     type: user
-    status: draft
+    status: migrated
     db: supabase-a
     path: blueprints/user/personal
   - slug: hospital

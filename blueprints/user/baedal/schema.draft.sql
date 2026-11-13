@@ -72,3 +72,5 @@ create table nomad_baedal.deliveries (
 alter table nomad_baedal.deliveries enable row level security;
 create policy deliveries_own on nomad_baedal.deliveries for all using (rider_id = auth.uid()) with check (rider_id = auth.uid());
 
+
+grant select, insert, update, delete on all tables in schema nomad_baedal to authenticated;

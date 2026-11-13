@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 root = sys.argv[1]; bp = os.path.join(root, 'blueprints'); errors = []; n = 0
 reg = open(os.path.join(bp, 'registry.yaml'), encoding='utf-8').read()
 reg_slugs = re.findall(r'^\s*- slug:\s*(\S+)', reg, re.M)
-for tdir in ('org', 'user', 'isolated'):
+for tdir in ('org', 'user', 'hybrid', 'isolated'):
     for d in sorted(glob.glob(os.path.join(bp, tdir, '*'))):
         slug = os.path.basename(d); n += 1; rel = 'blueprints/%s/%s' % (tdir, slug)
         py = os.path.join(d, 'blueprint.yaml')
@@ -33,9 +33,18 @@ for tdir in ('org', 'user', 'isolated'):
             if tdir == 'org':
                 body = re.search(r'create table\s+%s\s*\((.*?)\n\);' % re.escape(t), sql, re.S | re.I)
                 if body and 'organization_id' not in body.group(1): errors.append('%s: %s에 organization_id 없음' % (rel, t))
+            if tdir == 'hybrid':
+                body = re.search(r'create table\s+%s\s*\((.*?)\n\);' % re.escape(t), sql, re.S | re.I)
+                if body and not re.search(r'user_id\s+uuid\s+not null', body.group(1)): errors.append('%s: %s에 user_id not null 없음' % (rel, t))
         for ref in re.findall(r'references\s+([\w]+)\.', sql, re.I):
             allowed = {schema, 'auth'} if tdir == 'isolated' else {schema, 'nomad_core', 'auth'}
             if ref not in allowed: errors.append('%s: 스키마 간 참조 금지 (%s)' % (rel, ref))
+for tp in sorted(glob.glob(os.path.join(bp, '_templates', '*', 'schema.template.sql'))):
+    tname = os.path.basename(os.path.dirname(tp)); sql = open(tp, encoding='utf-8').read()
+    rls = set(re.findall(r'alter table\s+([\w.{}]+)\s+enable row level security', sql, re.I))
+    for t in re.findall(r'create table\s+([\w.{}]+)', sql, re.I):
+        if t not in rls: errors.append('_templates/%s: %s RLS 미활성' % (tname, t))
+    if not re.search(r'grant select, insert, update, delete on all tables in schema [\w{}]+ to authenticated;', sql): errors.append('_templates/%s: authenticated 테이블 권한 grant 없음' % tname)
 for s in reg_slugs:
     if not glob.glob(os.path.join(bp, '*', s)): errors.append('registry: %s 폴더 없음' % s)
 if re.search(r'(eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|postgres(ql)?://\S+:\S+@)', ''.join(open(f, encoding='utf-8', errors='ignore').read() for f in glob.glob(bp + '/**/*', recursive=True) if os.path.isfile(f))):

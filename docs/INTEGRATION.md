@@ -18,7 +18,7 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 ## 기존 제품에 적용
 
-1. 비어 있는 로컬 Supabase를 대상으로 공통 마이그레이션부터 실행합니다. 기존 Supabase 레포에서 사용할 경우 다음 두 SQL을 필요한 범위로 복사합니다. 기존 마이그레이션 번호와 충돌하면 대상 제품의 신규 버전 번호를 사용합니다.
+1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>]... [--with-accounts] [--with-example]`로 공통 마이그레이션(과 선택한 제품)을 복사합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
 2. 실습에서는 두 번째 마이그레이션까지 적용합니다. 기존 운영 제품은 별도 제품 키를 등록하고, 기존 업체 ID·사용자 ID·멤버십을 연결하는 추가 마이그레이션을 만듭니다.
 3. 제품별 스키마에는 업무 데이터와 업체 ID를 둡니다. 기존 데이터는 소속을 확정한 뒤 채우고, 조회·쓰기 정책 검증을 완료한 다음 앱 연결을 전환합니다.
 4. Data API를 사용한다면 `public.nomad_dashboard_features`를 통해 대시보드 카탈로그를 조회합니다. 예시 업무 테이블에 Data API가 필요한 실습 환경에서만 `nomad_contentflow_example`을 노출 스키마에 추가합니다. `nomad_core`는 API에 노출하지 않습니다.
@@ -41,6 +41,8 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 기능 이용권은 제품과 업체에 묶입니다. 운영자 권한 레코드는 업체 멤버십과 별도로 관리합니다. 운영자 레코드만으로 제품 고객 데이터의 RLS가 열리지 않습니다.
 
+service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블에 쓰기 전에 `nomad_core.org_has_feature(업체, 제품, 기능)`로 기능 이용권을 직접 확인해야 합니다(사용자 JWT가 없는 문맥용, service_role만 실행). 로그인 사용자 문맥에서는 `has_feature`를 씁니다. 구독이 없는 업체는 C 플랜으로 취급합니다.
+
 ## 결제 연결 계약
 
 - 결제 서버는 선택한 SKU의 제품·기능·가격을 서버의 결제 상품 설정으로 확인합니다. 웹훅 서명과 결제 상태 검증은 사용하게 될 결제사에 맞춰 구현합니다.
@@ -52,8 +54,8 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 로컬 Supabase에서 두 마이그레이션을 적용한 뒤 `tests/tenant_access.sql`을 로컬 DB에 실행합니다. 이 파일은 합성 데이터와 트랜잭션 롤백을 사용합니다. 실제 서비스 연결 시에는 앱에서 로그인한 세션으로 카탈로그 RPC와 Data API를 호출해 같은 결과를 확인합니다.
 
-개인형 제품은 개인 소유권에 맞춘 별도 업무 테이블을 사용합니다. 현재 업체 구독 테이블은 B2B용입니다. HumScore 개인 구독의 소유자를 명시하려면 별도 제품 설계로 추가합니다.
+개인형 제품(humscore·personal 등)의 업무 데이터는 `user_id`로 소유하고, 구독은 사용자가 owner인 조직(가입 시 생기는 1인 조직)에 둡니다. 유료 기능은 `nomad_core.user_has_feature`가 사용자가 owner인 활성 조직의 구독을 확인해 엽니다. 초대받은 멤버에게는 공유되지 않습니다. 기준표: [기능 카탈로그](design/01-architecture/feature-catalog.md).
 
 ## 서비스 청사진
 
-연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮깁니다.
+연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮기며, 확정된 서비스만 `install-db.sh --product <slug>`로 설치할 수 있습니다(초안은 설치 대상 아님).

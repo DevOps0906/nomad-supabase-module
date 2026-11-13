@@ -109,3 +109,5 @@ create policy quiz_attempts_insert_member on nomad_classroom.quiz_attempts for i
 create policy quiz_attempts_update_member on nomad_classroom.quiz_attempts for update using (nomad_core.organization_role(organization_id) is not null) with check (nomad_core.organization_role(organization_id) is not null);
 create policy quiz_attempts_delete_admin on nomad_classroom.quiz_attempts for delete using (nomad_core.organization_role(organization_id) in ('owner', 'admin'));
 
+
+grant select, insert, update, delete on all tables in schema nomad_classroom to authenticated;

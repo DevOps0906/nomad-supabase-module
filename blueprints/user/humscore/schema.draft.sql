@@ -48,3 +48,5 @@ create table nomad_humscore.exports (
 alter table nomad_humscore.exports enable row level security;
 create policy exports_own on nomad_humscore.exports for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+
+grant select, insert, update, delete on all tables in schema nomad_humscore to authenticated;
