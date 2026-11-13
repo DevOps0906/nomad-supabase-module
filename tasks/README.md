@@ -2,7 +2,13 @@
 
 | 번호 | 제목 | 웨이브 | 선행 | 위험도 | 담당 | 상태 |
 |---|---|---|---|---|---|---|
-| task-001 | 프로젝트 생성 · 토큰 | W1 | — | 낮음 | builder | 대기 |
+| task-001 | 계정 확장 마이그레이션 · 혼합형 청사진 템플릿 · 로컬 Supabase 구성 | W1 | — | 높음 | builder | 완료 |
+| task-002 | 서비스 청사진 11개를 확정 마이그레이션으로 전환 | W1 | task-001 | 높음 | builder | 완료 |
+| task-003 | DB 설치기 `scripts/install-db.sh` | W1 | task-002 | 보통 | builder | 완료 |
+| task-004 | 요금 플랜 · 기능 카탈로그와 기능 잠금 | W1 | task-003 | 높음 | builder | 완료 |
+| task-005 | 보류 status 값 목록 확정 · 컬럼 정리 | W2 | task-004 | 높음 | builder | 대기 |
+| task-006 | 플랜별 수량 한도 구조 (수치는 billing-credits 결정 후) | W2 | task-004 | 높음 | builder | 대기 |
+| task-007 | knowflow 대화 크레딧 차감을 기능 이용권에 연결 (멱등 키) | W2 | task-004 | 높음 | builder | 대기 |
 
 상태: 대기 / 진행 / 완료 / 보류
 
