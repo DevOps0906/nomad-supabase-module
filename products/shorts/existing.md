@@ -1,7 +1,7 @@
 # shorts 기존 DB 분류표 (Shopping-Shorts-Maker → nomad_shorts)
 
 - 원본: `D:\WorkSpace\DEV\Shopping-Shorts-Maker\supabase\migrations\` 51개를 순서대로 적용한 최종 상태를 로컬 DB에 재현해 센 값이다(2026-11-13).
-- **확정 수: 테이블 31개**(public 28 + private 3), **함수 166개**(public RPC 래퍼 47 + private 119), 트리거 20, 정책 43, 버킷 4, pgmq 큐 3, pg_cron 3, 역할 2.
+- **확정 수: 테이블 31개**(public 28 + private 3), **함수 166개**(원본 기준: public RPC 래퍼 47 + private 119 · 이식 후 private 117), 트리거 20, 정책 43, 버킷 4, pgmq 큐 3, pg_cron 3, 역할 2.
 - 변환: public → `nomad_shorts`(API 노출), private → `nomad_shorts_private`(비노출). 파일: `user/0001_shorts.sql`·`org/0001_shorts.sql`(+`0002_storage.sql`), 검사 `user/check_user.sql`·`org/check_org.sql`.
 - 이식 결과 테이블: nomad_shorts 28(user_settings 신규 1 포함, user_profiles 제거) + nomad_shorts_private 3 = 31. 함수: 166 − 2(삭제) = 164.
 
@@ -51,7 +51,7 @@ anon에게 주는 권한은 없다(원본도 공개 읽기 없음). 공용 읽�
 | private.channel_quotas_seed | 삭제(기존 데이터 이전용) | — | 일회성 |
 | 트리거 20개와 그 함수(set_updated_at 외) | 이관 | nomad_shorts_private.* | DB |
 | public RPC 래퍼 47개(아래) | 이관, 이름 유지 | nomad_shorts.<같은 이름> | 웹·서버 |
-| private 본체·헬퍼 117개 | 이관, 이름 유지 | nomad_shorts_private.<같은 이름> | RPC 본체·워커·cron |
+| private 함수 117개(본체·헬퍼·트리거 함수 포함 = 원본 119 − 삭제 2) | 이관, 이름 유지 | nomad_shorts_private.<같은 이름> | RPC 본체·워커·cron |
 | pgmq 큐 render·tts·analyze | 이관, 접두 | shorts_render·shorts_tts·shorts_analyze | 워커 |
 | pg_cron sweep-jobs·collect-metrics·cleanup-analytics | 이관, 접두 | shorts_sweep_jobs·shorts_collect_metrics·shorts_cleanup_analytics | cron |
 | 역할 worker_role·worker_login | 이관(비밀번호는 별도 설정) | 이름 유지 | 워커 |

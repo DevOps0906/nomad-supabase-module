@@ -54,7 +54,7 @@
 ## 버킷 · 기타
 - Storage 버킷 없음(config.toml은 주석 예시뿐) → `0002_storage.sql`·`app/*.sql` 없음.
 - 레포 `supabase/tests/rls.sql`은 원본 public 스키마 기준이라 손대지 않음. 새 검사는 `check_org.sql`.
-- 앱 변경 필요(레포 미수정, 참고): `nomad_contentflow` 스키마 노출·`db.schema` 지정, `workspaces`/`memberships` 조회를 `nomad_core.my_organizations()`로, 키워드 upsert 충돌 대상이 부분 유니크(`deleted_at is null`)라 PostgREST on_conflict 대신 조회 후 insert/update.
+- 앱 변경 필요(레포 미수정, 참고): `nomad_contentflow` 스키마 노출·`db.schema` 지정, `workspaces`/`memberships` 조회를 `public.nomad_my_organizations()`로(nomad_core는 API 비노출), 키워드 upsert 충돌 대상이 부분 유니크(`deleted_at is null`)라 PostgREST on_conflict 대신 조회 후 insert/update.
 
 ## 팀장 확인 필요
 1. reviewer 역할이 nomad_core에 없음 → 제품 표 reviewers로 보강함(core에 역할 추가 vs 현행 유지).

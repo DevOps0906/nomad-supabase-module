@@ -44,5 +44,5 @@ folders · tags · score_tags · youtube_sources — 구현되면 같은 규칙(
 `.from`: scores · setlists · share_links. `.rpc`: get_shared_score · get_shared_setlist · reissue_share_link. 모두 위 표에 있다. transcription_jobs는 코드 사용 없음.
 ## 전환 시 앱 변경 메모(레포는 수정하지 않음)
 - `.schema('nomad_humscore')` 지정, API 노출 스키마 설정.
-- org안: 모든 insert에 `organization_id`(개인 사용자는 본인 personal 조직 id, `nomad_core.my_organizations()`) 필요. `user_id`·`owner_id` 필드 제거.
+- org안: 모든 insert에 `organization_id`(개인 사용자는 본인 personal 조직 id, `public.nomad_my_organizations()`) 필요. `user_id`·`owner_id` 필드 제거.
 - 원본 `public` 테이블은 레포 쪽에서 별도 이관(데이터 이전은 이 작업 범위 밖).

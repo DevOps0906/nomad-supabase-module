@@ -48,7 +48,7 @@
 | consume_auth_rate_limit | 이관(anon·authenticated 호출) | nomad_knowflow.consume_auth_rate_limit | 웹 RPC | 동일 |
 | claim_job · heartbeat_job · progress_job · complete_job · fail_job | 이관(service_role) | nomad_knowflow.* | 워커 RPC | 동일 |
 | replace_source_chunks · replace_source_moments · apply_source_recheck · sweep_source_rechecks | 이관(service_role) | nomad_knowflow.* | 워커 RPC | 동일 |
-| consume_quota · consume_quota_for · refund_quota · refund_source_video_seconds | 이관(내부화) | nomad_knowflow_private.* | RPC 내부 | `consume_quota`(auth 기준)는 삭제하고 `consume_quota_for(소유 id,…)`만 둔다. `refund_quota`의 service_role grant 회수(앱 코드 직접 호출 없음). 월 사용량 행은 첫 차감 때 지연 생성 |
+| consume_quota · consume_quota_for · refund_quota · refund_source_video_seconds | 이관(내부화) | nomad_knowflow_private.* | RPC 내부 | org안은 `consume_quota`(auth 기준)를 삭제하고 `consume_quota_for(조직 id,…)`만 둔다. user안은 `consume_quota`(auth 기준)도 `nomad_knowflow_private`에 유지한다(내부 RPC가 호출, 노출 안 함). `refund_quota`의 service_role grant 회수(앱 코드 직접 호출 없음). 월 사용량 행은 첫 차감 때 지연 생성 |
 | claim_idempotency_key · enqueue_job · sync_source_status · reap_expired_jobs · current_period_start | 이관(내부) | nomad_knowflow_private.* | RPC 내부 | org안 `claim_idempotency_key`는 첫 인자 조직 id |
 | (신규) limit_of / org_limit · ensure_quota · can_write | 신규(내부) | nomad_knowflow_private.* | RPC 내부 | plan_limits 조회, 쓰기 권한(org안) |
 | handle_new_user(auth.users 트리거) · update_profile | 대체: nomad_core.handle_new_user(프로필·개인 조직 자동 생성) | (만들지 않음) | 앱 직접 사용 없음 | — |
