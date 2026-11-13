@@ -159,6 +159,58 @@ begin
   end if;
 end $$;
 
+-- 7. rate_limit_take(제품 definer RPC 내부용): execute grant 없음, 소유자 definer 래퍼 경유만 동작
+do $$
+begin
+  if has_function_privilege('authenticated', 'nomad_core.rate_limit_take(text,integer,integer)', 'execute')
+     or has_function_privilege('anon', 'nomad_core.rate_limit_take(text,integer,integer)', 'execute')
+     or has_function_privilege('service_role', 'nomad_core.rate_limit_take(text,integer,integer)', 'execute')
+  then raise exception 'rate_limit_take grants too wide'; end if;
+  if (select prosrc from pg_proc where oid = 'nomad_core.rate_limit_take(text,integer,integer)'::regprocedure)
+     not like '%on conflict (key) do update%'
+  then raise exception 'rate_limit_take is not a single upsert'; end if;
+end $$;
+create function public.rate_limit_take_test_rpc() returns boolean
+language sql security definer set search_path = ''
+as $$ select allowed from nomad_core.rate_limit_take('test:take:' || coalesce(auth.uid()::text, 'anon'), 2, 60) $$;
+grant execute on function public.rate_limit_take_test_rpc() to authenticated, anon;
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('test:direct', 3, 60)$$, '%permission denied%');
+do $$
+begin
+  if not public.rate_limit_take_test_rpc() or not public.rate_limit_take_test_rpc() then raise exception 'take within limit denied'; end if;
+  if public.rate_limit_take_test_rpc() then raise exception 'take over limit allowed'; end if;
+end $$;
+set local role anon;
+select set_config('request.jwt.claim.sub', '', true),
+       set_config('request.jwt.claims', '{"role":"anon"}', true);
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('test:direct', 3, 60)$$, '%permission denied%');
+do $$
+begin
+  if not public.rate_limit_take_test_rpc() then raise exception 'anon key not independent'; end if;
+end $$;
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('test:direct', 3, 60)$$, '%permission denied%');
+reset role;
+select set_config('request.jwt.claims', '', true);
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('', 3, 60)$$, '%invalid key%');
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('k:x', 3, 0)$$, '%must be >= 1%');
+-- 키 형식: '<제품>:' 접두사(소문자·숫자·_) 필수
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('nokey', 3, 60)$$, '%invalid key%');
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('Erp:join:x', 3, 60)$$, '%invalid key%');
+select pg_temp.expect_err($$select nomad_core.rate_limit_take(':join:x', 3, 60)$$, '%invalid key%');
+select pg_temp.expect_err($$select nomad_core.rate_limit_take('erp-x:join', 3, 60)$$, '%invalid key%');
+do $$
+begin
+  if (select count from nomad_core.rate_limit_buckets where key = 'test:take:00000000-0000-4000-8000-0000000000a1') <> 3
+  then raise exception 'take count wrong'; end if;
+  if exists (select 1 from nomad_core.rate_limit_buckets where key = 'test:direct') then raise exception 'direct take wrote a bucket'; end if;
+end $$;
+
 rollback;
 \o
 \echo 'rate_limit: ok'

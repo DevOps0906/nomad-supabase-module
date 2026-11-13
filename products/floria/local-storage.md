@@ -18,7 +18,7 @@
 | `nomad.floria.sites.v1` | sites | 조직의 사이트 설정(표시용). 쓰기는 온라인 RPC만 |
 | `nomad.floria.inquiries.v1` | inquiries | owner/admin/editor만(RLS, viewer는 0행). 개인정보 — 최근 30일·목록 필드만 보관, 로그아웃·조직 전환 시 즉시 삭제 |
 | `nomad.floria.syncstate.v1` | — | 테이블별 마지막 동기 시각 `{ sites: ISO, inquiries: ISO }` |
-캐시하지 않음: newsletter_subscribers(이메일 개인정보, 온라인 조회만), rate_limits·audit_logs(비노출 스키마), 사이트 콘텐츠(정적 자산이 정본), AI 대화(서버 보관).
+캐시하지 않음: newsletter_subscribers(이메일 개인정보, 온라인 조회만), 요청 제한·감사 로그(nomad_core 공용 표, 클라이언트 접근 없음), 사이트 콘텐츠(정적 자산이 정본), AI 대화(서버 보관).
 
 ## 동기화 규칙 (마지막 쓰기 우선)
 1. 내려받기: `updated_at > syncstate` 행을 `organization_id` 단위로 증분 조회(`sites_org_idx`·`inquiries_org_updated_idx`).

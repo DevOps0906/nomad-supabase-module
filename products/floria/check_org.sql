@@ -33,6 +33,10 @@ insert into nomad_core.memberships (organization_id, user_id, role) values
   ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a5', 'viewer'),
   ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000a2', 'owner');
 
+-- 구독이 끊기면 잠기므로(C에 site 없음) 두 조직 모두 B 구독
+insert into nomad_core.subscriptions (organization_id, product_code, plan_code, status) values
+  ('00000000-0000-0000-0000-00000000000a', 'floria', 'B', 'active'), ('00000000-0000-0000-0000-00000000000b', 'floria', 'B', 'active');
+
 -- ==== 0. 서버(service_role): 사이트 등록 ====
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
@@ -52,8 +56,9 @@ select set_config('request.jwt.claims', '{"role":"anon"}', true);
 select zz_check.denied('select count(*) from nomad_floria.sites');
 select zz_check.denied('select count(*) from nomad_floria.inquiries');
 select zz_check.denied($$insert into nomad_floria.inquiries (organization_id, site_id, kind, name, email, message, consent_version) values ('00000000-0000-0000-0000-00000000000a', gen_random_uuid(), 'other', 'x', 'x@example.test', 'xxxxxxxxxxxx', 'v1')$$);
-select zz_check.denied('select * from nomad_floria_private.rate_limits');
-select zz_check.denied($$select nomad_floria_private.rate_limit_hit('k', 1, 60)$$);
+select zz_check.denied('select * from nomad_core.rate_limit_buckets');
+select zz_check.denied($$select nomad_core.rate_limit_take('k', 1, 60)$$);
+select zz_check.denied('select * from nomad_core.audit_log');
 select zz_check.denied($$select nomad_floria.subscribe_newsletter('floria-a', 'n@example.test', 'ko', 'v1')$$);
 select zz_check.denied($$select nomad_floria.purge_expired()$$);
 select zz_check.denied($$select nomad_floria.set_inquiry_status(gen_random_uuid(), 'read')$$);
@@ -169,19 +174,68 @@ select set_config('request.jwt.claims', '{"role":"anon"}', true);
 select zz_check.fails_with($$select nomad_floria.submit_inquiry('floria-a', 'other', 'V', 'v9@example.test', null, 'Hello, I want a wedding bouquet.', 'ko', 'v1', null, null, 8000)$$, 'SI002');
 reset role;
 
--- ==== 7. 기능 잠금: 플랜 C 에서 site 기능을 빼면 조회·운영 RPC 모두 막힌다 ====
-delete from nomad_core.plan_features where product_code = 'floria' and plan_code = 'C' and feature_code = 'site';
+-- ==== 7. 기능 잠금: 구독이 끊기면(만료·inactive·구독 없음 = C 취급, C에는 site 없음) 공개 접수·조회·운영 RPC 잠김 ====
+-- 단 개인정보 삭제(delete_inquiry·erase_subscriber)는 잠긴 조직에서도 owner/admin에게 허용(의도)
+select zz_check.expect($$select count(*) from nomad_core.plan_features where product_code = 'floria' and plan_code = 'C'$$, 0);
+update nomad_floria.sites set accepts_inquiries = true where slug = 'floria-a';
+insert into t_ids select 'inq_fast', id from nomad_floria.inquiries where email = 'fast@example.test';
+create function pg_temp.floria_locked_checks() returns void language plpgsql as $f$
+begin
+  set local role anon;
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  perform zz_check.fails_with($$select nomad_floria.submit_inquiry('floria-a', 'other', 'V', 'v8@example.test', null, 'Hello, I want a wedding bouquet.', 'ko', 'v1', null, null, 8000)$$, 'SI002');
+  set local role service_role;
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  perform zz_check.fails_with($$select nomad_floria.subscribe_newsletter('floria-a', 'lock@example.test', 'ko', 'v1', '/', null, 5000)$$, 'SI002');
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
+  perform zz_check.expect('select count(*) from nomad_floria.sites', 0);
+  perform zz_check.expect('select count(*) from nomad_floria.inquiries', 0);
+  perform zz_check.expect('select count(*) from nomad_floria.newsletter_subscribers', 0);
+  perform zz_check.fails_with($$select nomad_floria.update_site_settings((select id from t_ids where k = 'site_a'), 'X')$$, 'no entitlement');
+  perform zz_check.fails_with($$select nomad_floria.set_inquiry_status((select id from t_ids where k = 'inq_fast'), 'read')$$, 'no entitlement');
+  perform zz_check.fails_with($$select nomad_floria.update_ai_settings((select id from t_ids where k = 'site_a'), true)$$, 'no entitlement');
+  -- 조직 B(구독 유지)는 그대로
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}', true);
+  perform zz_check.expect('select count(*) from nomad_floria.sites', 1);
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+end $f$;
+-- 7-1 만료(ends_at 지남)
+update nomad_core.subscriptions set starts_at = now() - interval '2 days', ends_at = now() - interval '1 day'
+  where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'floria';
+select pg_temp.floria_locked_checks();
+-- 7-2 inactive
+update nomad_core.subscriptions set status = 'inactive', ends_at = null
+  where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'floria';
+select pg_temp.floria_locked_checks();
+-- 7-3 구독 행 없음 + 서버도 사이트 등록 불가
+delete from nomad_core.subscriptions where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'floria';
+select pg_temp.floria_locked_checks();
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select zz_check.fails_with($$select nomad_floria.provision_site('00000000-0000-0000-0000-00000000000a', 'floria-a2', 'A2')$$, 'no site entitlement');
+-- 잠긴 상태에서도 개인정보 삭제는 허용(owner)
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
-select zz_check.expect('select count(*) from nomad_floria.sites', 0);
-select zz_check.fails_with($$select nomad_floria.update_site_settings((select id from t_ids where k = 'site_a'), 'X')$$, 'no entitlement');
+select nomad_floria.delete_inquiry((select id from t_ids where k = 'inq_fast'));
+select nomad_floria.erase_subscriber((select id from t_ids where k = 'sub_a'));
 reset role;
-insert into nomad_core.plan_features (product_code, plan_code, feature_code) values ('floria', 'C', 'site');
+select set_config('request.jwt.claims', '', true);
+select zz_check.expect($$select count(*) from nomad_floria.inquiries where email = 'fast@example.test'$$, 0);
+-- 재구독(B)하면 풀림
+insert into nomad_core.subscriptions (organization_id, product_code, plan_code, status)
+  values ('00000000-0000-0000-0000-00000000000a', 'floria', 'B', 'active');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
+select zz_check.expect('select count(*) from nomad_floria.sites', 1);
+reset role;
+select set_config('request.jwt.claims', '', true);
 
 -- ==== 8. 함수 권한 · 동기화 컬럼 ====
 -- anon 이 실행 가능한 함수는 공개 RPC submit_inquiry 하나뿐(D8)
 select zz_check.expect($$select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname in ('nomad_floria', 'nomad_floria_private') and has_function_privilege('anon', p.oid, 'execute')
+  where n.nspname = 'nomad_floria' and has_function_privilege('anon', p.oid, 'execute')
     and p.prorettype <> 'trigger'::regtype$$, 1);
 -- touch 트리거: 같은 트랜잭션 안에서도 updated_at 이 created_at(now()) 보다 커진다(run_check.sh 임시 정의는 clock_timestamp)
 update nomad_floria.sites set name = 'Floria B2' where slug = 'floria-b';
@@ -190,9 +244,16 @@ select zz_check.expect($$select count(*) from pg_trigger where tgname in ('sites
 
 -- ==== 9. P1 보안 회귀 ====
 -- 한도 초과 반환이 롤백되지 않아 이메일 카운터가 한도(3)를 넘어 쌓였다(정상 3 + 초과 2 = 5)
-select zz_check.expect($$select hits::bigint from nomad_floria_private.rate_limits where key like 'inq:email:%'$$, 5);
+select zz_check.expect($$select count::bigint from nomad_core.rate_limit_buckets
+  where key = 'floria:inq:email:' || (select id from nomad_floria.sites where slug = 'floria-a')::text || ':'
+              || encode(extensions.digest(convert_to('v1@example.test', 'UTF8'), 'sha256'), 'hex')$$, 5);
+-- core 교체(제품 사본 없음): 비노출 스키마 없음, 감사는 nomad_core.audit_log(provision 2 · 상태 변경 2 · 삭제 2(잠긴 조직 삭제 포함), 행위자 강제)
+select zz_check.expect($$select count(*) from pg_namespace where nspname = 'nomad_floria_private'$$, 0);
+select zz_check.expect($$select count(*) from nomad_core.audit_log where action = 'site.provision'$$, 2);
+select zz_check.expect($$select count(*) from nomad_core.audit_log where action = 'inquiry.status' and organization_id = '00000000-0000-0000-0000-00000000000a' and actor_role = 'user' and actor_id is not null$$, 2);
+select zz_check.expect($$select count(*) from nomad_core.audit_log where action = 'inquiry.delete' and organization_id = '00000000-0000-0000-0000-00000000000a'$$, 2);
 -- 테이블 권한: anon 은 전무, authenticated 는 SELECT(공개 스키마 3개) 외 없음
 select zz_check.expect($$select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
-  where n.nspname in ('nomad_floria', 'nomad_floria_private') and c.relkind = 'r'
+  where n.nspname = 'nomad_floria' and c.relkind = 'r'
     and (has_table_privilege('anon', c.oid, 'select,insert,update,delete,truncate,references,trigger')
          or has_table_privilege('authenticated', c.oid, 'insert,update,delete,truncate,references,trigger'))$$, 0);

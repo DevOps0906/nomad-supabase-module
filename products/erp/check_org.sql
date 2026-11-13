@@ -42,6 +42,9 @@ insert into nomad_core.memberships (organization_id, user_id, role) values
   ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a5', 'viewer'),
   ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a9', 'editor'),
   ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000a2', 'owner');
+-- 기능 잠금: 두 조직 모두 B 구독(erp/workspace). 구독 없음·C는 잠김(10장)
+insert into nomad_core.subscriptions (organization_id, product_code, plan_code, status) values
+  ('00000000-0000-0000-0000-00000000000a', 'erp', 'B', 'active'), ('00000000-0000-0000-0000-00000000000b', 'erp', 'B', 'active');
 
 -- ==== 0. 서버 프로비저닝(세션 사용자 postgres = 서버 호출) ====
 select nomad_erp.register_workspace('00000000-0000-0000-0000-00000000000a', 'A 상사');
@@ -139,7 +142,7 @@ reset role;
 
 -- ==== 7. 승인제 가입: 신청(a6) → 승인(a1) → 초대 생성, 재신청 거부 ====
 select zz_check.login('00000000-0000-0000-0000-0000000000a6');
-select zz_check.fails_with($$select nomad_erp.request_join('ZZZZZZZZ', '신청자')$$, 'invalid join code');
+select zz_check.expect($$select count(*) from (select nomad_erp.request_join('ZZZZZZZZ', '신청자') r) t where r->>'ok' = 'false' and r->>'code' = 'P0002'$$, 1);
 select nomad_erp.request_join((select v from t_ids where k = 'code_a'), '신청자', '가입 희망');
 select nomad_erp.request_join((select v from t_ids where k = 'code_a'), '신청자');
 select zz_check.expect($$select count(*) from nomad_erp.join_requests$$, 1);
@@ -195,3 +198,56 @@ select zz_check.fails_with($$insert into storage.objects (bucket_id, name, owner
 select zz_check.fails_with($$insert into storage.objects (bucket_id, name, owner) values ('erp-product-images', '0000000-00000-0000-0000-00000000000a/erp/product/y.png', '00000000-0000-0000-0000-0000000000a1')$$, 'row-level security');
 insert into storage.objects (bucket_id, name, owner) values ('erp-product-images', '00000000-0000-0000-0000-00000000000a/erp/product/ok.png', '00000000-0000-0000-0000-0000000000a1');
 reset role;
+
+-- ==== 10. 기능 잠금: 구독이 끊기면 잠김 · export_xlsx(A만) · request_join 시도 제한 ====
+select zz_check.expect($$select count(*) from nomad_core.plan_features where product_code = 'erp' and plan_code = 'C'$$, 0);
+select zz_check.login('00000000-0000-0000-0000-0000000000a1');
+select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 1);
+select zz_check.expect($$select nomad_core.has_feature('00000000-0000-0000-0000-00000000000a', 'erp', 'export_xlsx')::int$$, 0);
+reset role;
+update nomad_core.subscriptions set plan_code = 'A' where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'erp';
+select zz_check.login('00000000-0000-0000-0000-0000000000a1');
+select zz_check.expect($$select nomad_core.has_feature('00000000-0000-0000-0000-00000000000a', 'erp', 'export_xlsx')::int$$, 1);
+reset role;
+-- 구독 끊김(inactive): owner·직원 모두 테이블·RPC 잠김, 다른 조직(B)은 그대로
+update nomad_core.subscriptions set status = 'inactive' where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'erp';
+select zz_check.login('00000000-0000-0000-0000-0000000000a1');
+select zz_check.expect($$select nomad_erp.has_access('00000000-0000-0000-0000-00000000000a')::int$$, 0);
+select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 0);
+select zz_check.expect($$select count(*) from nomad_erp.products$$, 0);
+select zz_check.expect($$select nomad_core.has_feature('00000000-0000-0000-0000-00000000000a', 'erp', 'export_xlsx')::int$$, 0);
+select zz_check.denied($$insert into nomad_erp.departments (organization_id, name) values ('00000000-0000-0000-0000-00000000000a', '잠김부')$$);
+select zz_check.fails_with($$select nomad_erp.dashboard_metrics('00000000-0000-0000-0000-00000000000a')$$, 'no access');
+select zz_check.fails_with($$select nomad_erp.record_sale((select v::uuid from t_ids where k = 'p1'), 1, 'sale-req-lock')$$, 'master_admin/sales_manager only');
+select zz_check.fails_with($$select nomad_erp.get_join_code('00000000-0000-0000-0000-00000000000a')$$, 'master_admin only');
+select zz_check.login('00000000-0000-0000-0000-0000000000a3');
+select zz_check.expect($$select count(*) from nomad_erp.products$$, 0);
+select zz_check.login('00000000-0000-0000-0000-0000000000a2');
+select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 1);
+reset role;
+-- 만료(ends_at 지남)·C 구독도 잠김, 재구독(B)하면 풀림
+update nomad_core.subscriptions set status = 'active', plan_code = 'B', starts_at = now() - interval '2 days', ends_at = now() - interval '1 day'
+  where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'erp';
+select zz_check.login('00000000-0000-0000-0000-0000000000a1');
+select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 0);
+reset role;
+update nomad_core.subscriptions set plan_code = 'C', ends_at = null where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'erp';
+select zz_check.login('00000000-0000-0000-0000-0000000000a1');
+select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 0);
+reset role;
+update nomad_core.subscriptions set plan_code = 'B' where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'erp';
+select zz_check.login('00000000-0000-0000-0000-0000000000a1');
+select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 1);
+select zz_check.expect($$select count(*) from nomad_erp.products$$, 1);
+reset role;
+-- request_join 시도 제한: 사용자당 10회/시간. 잘못된 코드도 세고(롤백 안 됨), 11번째는 맞는 코드여도 ER006
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000a7', 'a7@example.test');
+select zz_check.login('00000000-0000-0000-0000-0000000000a7');
+select zz_check.expect($$select count(*) from generate_series(1, 10) g, lateral (select nomad_erp.request_join('WRONG' || g, '추측') r) t
+  where r->>'code' = 'P0002'$$, 10);
+select zz_check.expect($$select count(*) from (select nomad_erp.request_join((select v from t_ids where k = 'code_a'), '추측') r) t
+  where r->>'ok' = 'false' and r->>'code' = 'ER006' and (r->>'reset_at') is not null$$, 1);
+select zz_check.denied($$select nomad_core.rate_limit_take('erp:join:x', 10, 3600)$$);
+reset role;
+select zz_check.expect($$select count from nomad_core.rate_limit_buckets where key = 'erp:join:00000000-0000-0000-0000-0000000000a7'$$, 11);
+select zz_check.expect($$select count(*) from nomad_erp.join_requests where user_id = '00000000-0000-0000-0000-0000000000a7'$$, 0);

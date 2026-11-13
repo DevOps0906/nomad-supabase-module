@@ -20,7 +20,7 @@ declare v_row nomad_floria.sites; v_before jsonb; v_chat boolean; v_voice boolea
 begin
   select * into v_row from nomad_floria.sites where id = p_site_id for update;
   if not found then raise exception 'update_ai_settings: not found' using errcode = 'P0002'; end if;
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     if coalesce(nomad_core.organization_role(v_row.organization_id), '') not in ('owner', 'admin') then
       raise exception 'update_ai_settings: owner/admin only' using errcode = '42501';
     end if;
@@ -33,7 +33,7 @@ begin
   v_voice := coalesce(p_accepts_voice, v_row.accepts_voice) and v_chat;
   update nomad_floria.sites set accepts_ai_chat = v_chat, accepts_voice = v_voice
    where id = p_site_id returning * into v_row;
-  perform nomad_floria_private.write_audit(v_row.organization_id, 'site.ai_settings', 'site', p_site_id::text, v_before,
+  perform nomad_core.write_audit(v_row.organization_id, 'site.ai_settings', 'site', p_site_id::text, v_before,
                                            jsonb_build_object('accepts_ai_chat', v_row.accepts_ai_chat, 'accepts_voice', v_row.accepts_voice));
   return v_row;
 end;

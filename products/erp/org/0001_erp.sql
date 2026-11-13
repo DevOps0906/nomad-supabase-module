@@ -13,6 +13,14 @@ alter default privileges in schema nomad_erp revoke execute on functions from pu
 alter default privileges in schema nomad_erp_private revoke execute on functions from public;
 
 insert into nomad_core.products (code, name) values ('erp', 'Admin Suite ERP') on conflict (code) do nothing;
+-- 플랜 A/B/C 와 기능 잠금. 구독이 끊긴 조직은 C로 취급(core 규칙)되므로 C에는 기능을 두지 않는다 = 구독이 끊기면 잠긴다.
+-- workspace = ERP 전체 접근(has_access가 본다) · export_xlsx = 엑셀 내보내기(앱이 has_feature로 확인). 원본 default→B, standard→A.
+insert into nomad_core.plans (product_code, code, name) values ('erp', 'A', 'A'), ('erp', 'B', 'B'), ('erp', 'C', 'C')
+  on conflict do nothing;
+insert into nomad_core.features (product_code, code, name) values ('erp', 'workspace', 'ERP 워크스페이스'), ('erp', 'export_xlsx', '엑셀 내보내기')
+  on conflict do nothing;
+insert into nomad_core.plan_features (product_code, plan_code, feature_code)
+  values ('erp', 'A', 'workspace'), ('erp', 'B', 'workspace'), ('erp', 'A', 'export_xlsx') on conflict do nothing;
 
 -- ---------- 비노출 도우미 ----------
 -- 사용자 세션(authenticated/anon)이면 true. 보안 정의 RPC 안에서도 role 설정은 바뀌지 않으므로 호출자 구분에 쓴다.
@@ -260,12 +268,13 @@ $$;
 create trigger join_requests_guard_transition before update on nomad_erp.join_requests for each row execute function nomad_erp.join_requests_guard_transition();
 
 -- ---------- 역할 도우미 (security definer·stable, 정책 안 재귀 방지) ----------
--- 접근 = 활성 워크스페이스 + 활성 조직 멤버십 + (owner/admin 이거나 활성 employees 행)
+-- 접근 = 활성 워크스페이스 + 기능 이용권 erp/workspace(A·B 구독) + 활성 조직 멤버십 + (owner/admin 이거나 활성 employees 행)
 create function nomad_erp.has_access(target_organization uuid) returns boolean
 language sql stable security definer set search_path = ''
 as $$
   select (select auth.uid()) is not null
      and exists (select 1 from nomad_erp.workspaces w where w.organization_id = target_organization and w.status = 'active')
+     and nomad_core.org_has_feature(target_organization, 'erp', 'workspace')
      and nomad_core.organization_role(target_organization) is not null
      and (nomad_core.organization_role(target_organization) in ('owner', 'admin')
           or exists (select 1 from nomad_erp.employees e
@@ -462,19 +471,25 @@ begin
 end;
 $$;
 
--- 가입 요청(승인제): 로그인 사용자가 가입 코드로 요청. 입력 검증은 코드·이름 길이·멤버/초대 중복. (코드 무차별 대입은 32^8이라 낮음 — 호출 제한은 API 계층 메모)
-create function nomad_erp.request_join(p_join_code text, p_applicant_name text, p_message text default null) returns nomad_erp.join_requests
+-- 가입 요청(승인제): 로그인 사용자가 가입 코드로 요청. 입력 검증은 코드·이름 길이·멤버/초대 중복.
+-- 코드 추측 방지: 사용자당 10회/시간(nomad_core.rate_limit_take, 성공·실패 모두 1회). 잘못된 코드·한도 초과는 raise하면
+-- 시도 카운트까지 롤백되므로 결과로 돌려준다: {ok:true, request:{…}} · {ok:false, code:'P0002'(잘못된 코드)} · {ok:false, code:'ER006'(시도 초과), reset_at}.
+create function nomad_erp.request_join(p_join_code text, p_applicant_name text, p_message text default null) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
-declare v_org uuid; v_email text; v_row nomad_erp.join_requests;
+declare v_org uuid; v_email text; v_row nomad_erp.join_requests; v_rl record;
 begin
   if (select auth.uid()) is null then
     raise exception 'request_join: login required' using errcode = '42501';
   end if;
+  select * into v_rl from nomad_core.rate_limit_take('erp:join:' || (select auth.uid())::text, 10, 3600);
+  if not v_rl.allowed then
+    return jsonb_build_object('ok', false, 'code', 'ER006', 'reset_at', v_rl.reset_at);
+  end if;
   select w.organization_id into v_org from nomad_erp.join_codes j join nomad_erp.workspaces w on w.organization_id = j.organization_id
   where j.join_code = upper(btrim(p_join_code)) and w.status = 'active';
   if v_org is null then
-    raise exception 'request_join: invalid join code' using errcode = 'P0002';
+    return jsonb_build_object('ok', false, 'code', 'P0002');
   end if;
   select lower(btrim(au.email)) into v_email from auth.users au where au.id = (select auth.uid());
   if exists (select 1 from nomad_core.memberships m where m.organization_id = v_org and m.user_id = (select auth.uid()))
@@ -483,13 +498,12 @@ begin
     raise exception 'request_join: already a member or invited' using errcode = 'ER005';
   end if;
   select * into v_row from nomad_erp.join_requests r where r.organization_id = v_org and r.user_id = (select auth.uid()) and r.status = 'pending';
-  if found then
-    return v_row;
+  if not found then
+    insert into nomad_erp.join_requests (organization_id, user_id, applicant_name, message)
+    values (v_org, (select auth.uid()), btrim(p_applicant_name), p_message)
+    returning * into v_row;
   end if;
-  insert into nomad_erp.join_requests (organization_id, user_id, applicant_name, message)
-  values (v_org, (select auth.uid()), btrim(p_applicant_name), p_message)
-  returning * into v_row;
-  return v_row;
+  return jsonb_build_object('ok', true, 'request', to_jsonb(v_row));
 end;
 $$;
 

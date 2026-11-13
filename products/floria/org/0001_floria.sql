@@ -1,74 +1,24 @@
 -- website-floria 이식 · 조직형(org안). 원본: platform-docs _supabase-modular/migrations/2200_site.sql 1~10절(AI·음성은 0002_ai.sql)
 -- core.organizations→nomad_core.organizations(org_id→organization_id), org_members→nomad_core.memberships(member→editor),
 -- has_entitlement→nomad_core.has_feature / org_has_feature(기능 코드 floria/site). 대응표: products/floria/existing.md
--- 전제: nomad_core.touch_updated_at() (core 20261119000100). 되돌림: drop schema nomad_floria cascade; drop schema nomad_floria_private cascade;
+-- 전제: nomad_core.touch_updated_at() (core 20261119000100). 되돌림: drop schema nomad_floria cascade;
 begin;
 
 create schema nomad_floria;
-create schema nomad_floria_private;
-revoke all on schema nomad_floria, nomad_floria_private from public, anon, authenticated;
+revoke all on schema nomad_floria from public, anon, authenticated;
 grant usage on schema nomad_floria to anon, authenticated, service_role;
 
 insert into nomad_core.products (code, name) values ('floria', 'Website Floria') on conflict (code) do nothing;
 insert into nomad_core.plans (product_code, code, name) values
   ('floria', 'A', 'A'), ('floria', 'B', 'B'), ('floria', 'C', 'C') on conflict do nothing;
 insert into nomad_core.features (product_code, code, name) values ('floria', 'site', '브랜드 사이트 문의·뉴스레터') on conflict do nothing;
+-- 구독이 끊기면 잠긴다: 구독 없음·만료·inactive는 C로 취급(core 규칙)되므로 C에는 site를 두지 않는다.
 insert into nomad_core.plan_features (product_code, plan_code, feature_code) values
-  ('floria', 'A', 'site'), ('floria', 'B', 'site'), ('floria', 'C', 'site') on conflict do nothing;
+  ('floria', 'A', 'site'), ('floria', 'B', 'site') on conflict do nothing;
 
--- ---------- 비노출 도우미 ----------
-create table nomad_floria_private.rate_limits (
-  key text primary key check (length(key) between 1 and 300),
-  window_start timestamptz not null default now(),
-  hits int not null default 0
-);
-comment on table nomad_floria_private.rate_limits is '공개 RPC 요청 제한 카운터(비노출). rate_limit_hit 함수만 접근.';
-alter table nomad_floria_private.rate_limits enable row level security;
-
-create table nomad_floria_private.audit_logs (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid references nomad_core.organizations(id) on delete cascade,
-  actor_id uuid,
-  action text not null check (length(action) between 1 and 80),
-  entity text,
-  entity_id text,
-  before_data jsonb,
-  after_data jsonb,
-  created_at timestamptz not null default now()
-);
-comment on table nomad_floria_private.audit_logs is '운영 RPC 감사 로그(비노출, 개인정보 없음).';
-create index audit_logs_org_idx on nomad_floria_private.audit_logs (organization_id, created_at desc);
-alter table nomad_floria_private.audit_logs enable row level security;
-
--- 서버(service_role) 호출 판정. DEFINER 안에서도 JWT 클레임을 본다.
-create function nomad_floria_private.is_service_caller() returns boolean
-language sql stable set search_path = ''
-as $$ select coalesce(auth.role(), '') = 'service_role' $$;
-
--- true = 허용, false = 한도 초과
-create function nomad_floria_private.rate_limit_hit(p_key text, p_max int, p_window_seconds int) returns boolean
-language plpgsql security definer set search_path = ''
-as $$
-declare h int;
-begin
-  if p_max < 1 or p_window_seconds < 1 or p_window_seconds > 86400 then raise exception 'invalid rate limit'; end if;
-  if random() < 0.02 then
-    delete from nomad_floria_private.rate_limits where window_start < now() - interval '1 day';
-  end if;
-  insert into nomad_floria_private.rate_limits as r (key, window_start, hits) values (p_key, now(), 1)
-  on conflict (key) do update set
-    hits = case when r.window_start < now() - make_interval(secs => p_window_seconds) then 1 else r.hits + 1 end,
-    window_start = case when r.window_start < now() - make_interval(secs => p_window_seconds) then now() else r.window_start end
-  returning hits into h;
-  return h <= p_max;
-end $$;
-
-create function nomad_floria_private.write_audit(p_org uuid, p_action text, p_entity text, p_entity_id text, p_before jsonb, p_after jsonb)
-returns void language sql security definer set search_path = ''
-as $$
-  insert into nomad_floria_private.audit_logs (organization_id, actor_id, action, entity, entity_id, before_data, after_data)
-  values (p_org, (select auth.uid()), p_action, p_entity, p_entity_id, p_before, p_after)
-$$;
+-- ---------- 공통 도우미: nomad_core 사용(제품 사본 없음) ----------
+-- 서버 판정 nomad_core.is_service_caller() · 요청 제한 nomad_core.rate_limit_take(키 접두사 'floria:', 정리는 purge_rate_limit_buckets 스케줄)
+-- · 감사 nomad_core.write_audit(→ nomad_core.audit_log, 콘솔 조회는 public.nomad_audit_log).
 
 -- ---------- 1. sites: 사이트 등록부 (쓰기는 provision_site·update_site_settings·update_ai_settings RPC뿐) ----------
 create table nomad_floria.sites (
@@ -227,7 +177,7 @@ create policy inquiries_select on nomad_floria.inquiries for select to authentic
 create policy newsletter_select on nomad_floria.newsletter_subscribers for select to authenticated
   using (nomad_core.organization_role(organization_id) in ('owner', 'admin', 'editor') and nomad_core.has_feature(organization_id, 'floria', 'site'));
 
-revoke all on all tables in schema nomad_floria, nomad_floria_private from public, anon, authenticated;
+revoke all on all tables in schema nomad_floria from public, anon, authenticated;
 grant select on nomad_floria.sites, nomad_floria.inquiries, nomad_floria.newsletter_subscribers to authenticated;
 grant select, insert, update, delete on all tables in schema nomad_floria to service_role;
 
@@ -252,7 +202,7 @@ begin
     raise exception 'submit_inquiry: site unavailable' using errcode = 'SI002';
   end if;
   -- 한도 초과는 raise 대신 {ok:false} 로 반환한다(raise 면 카운터 증가가 롤백돼 한도가 쌓이지 않는다)
-  if not nomad_floria_private.rate_limit_hit('inq:flood:' || v_site.id::text, 100, 3600) then
+  if not (select allowed from nomad_core.rate_limit_take('floria:inq:flood:' || v_site.id::text, 100, 3600)) then
     return jsonb_build_object('ok', false, 'code', 'SI001');
   end if;
   if coalesce(btrim(p_honeypot), '') <> '' then
@@ -277,9 +227,9 @@ begin
     raise exception 'submit_inquiry: consent missing or outdated' using errcode = 'SI004';
   end if;
   v_hash := encode(extensions.digest(convert_to(v_email, 'UTF8'), 'sha256'), 'hex');
-  if not nomad_floria_private.rate_limit_hit('inq:email:' || v_site.id::text || ':' || v_hash, 3, 3600)
-     or not nomad_floria_private.rate_limit_hit('inq:emailday:' || v_site.id::text || ':' || v_hash, 6, 86400)
-     or not nomad_floria_private.rate_limit_hit('inq:day:' || v_site.id::text, 500, 86400) then
+  if not (select allowed from nomad_core.rate_limit_take('floria:inq:email:' || v_site.id::text || ':' || v_hash, 3, 3600))
+     or not (select allowed from nomad_core.rate_limit_take('floria:inq:emailday:' || v_site.id::text || ':' || v_hash, 6, 86400))
+     or not (select allowed from nomad_core.rate_limit_take('floria:inq:day:' || v_site.id::text, 500, 86400)) then
     return jsonb_build_object('ok', false, 'code', 'SI001');
   end if;
   if p_elapsed_ms is null then
@@ -311,7 +261,7 @@ as $$
 declare
   v_site nomad_floria.sites; v_email text; v_hash text; v_row nomad_floria.newsletter_subscribers; v_send boolean := false;
 begin
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     raise exception 'subscribe_newsletter: service_role only' using errcode = '42501';
   end if;
   select * into v_site from nomad_floria.sites where slug = lower(coalesce(p_site_slug, ''));
@@ -319,7 +269,7 @@ begin
      or not nomad_core.org_has_feature(v_site.organization_id, 'floria', 'site') then
     raise exception 'subscribe_newsletter: site unavailable' using errcode = 'SI002';
   end if;
-  if not nomad_floria_private.rate_limit_hit('nl:flood:' || v_site.id::text, 200, 3600) then
+  if not (select allowed from nomad_core.rate_limit_take('floria:nl:flood:' || v_site.id::text, 200, 3600)) then
     raise exception 'subscribe_newsletter: rate limited' using errcode = 'SI001';
   end if;
   if coalesce(btrim(p_honeypot), '') <> '' or (p_elapsed_ms is not null and p_elapsed_ms < 1500) then
@@ -335,7 +285,7 @@ begin
     raise exception 'subscribe_newsletter: consent missing or outdated' using errcode = 'SI004';
   end if;
   v_hash := encode(extensions.digest(convert_to(v_email, 'UTF8'), 'sha256'), 'hex');
-  if not nomad_floria_private.rate_limit_hit('nl:email:' || v_site.id::text || ':' || v_hash, 3, 3600) then
+  if not (select allowed from nomad_core.rate_limit_take('floria:nl:email:' || v_site.id::text || ':' || v_hash, 3, 3600)) then
     raise exception 'subscribe_newsletter: rate limited' using errcode = 'SI001';
   end if;
   select * into v_row from nomad_floria.newsletter_subscribers where site_id = v_site.id and email_hash = v_hash for update;
@@ -369,7 +319,7 @@ returns jsonb language plpgsql security definer set search_path = ''
 as $$
 declare v_row nomad_floria.newsletter_subscribers;
 begin
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     raise exception 'confirm_newsletter: service_role only' using errcode = '42501';
   end if;
   select * into v_row from nomad_floria.newsletter_subscribers where id = p_subscriber_id for update;
@@ -387,7 +337,7 @@ returns jsonb language plpgsql security definer set search_path = ''
 as $$
 declare v_row nomad_floria.newsletter_subscribers;
 begin
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     raise exception 'unsubscribe_newsletter: service_role only' using errcode = '42501';
   end if;
   select * into v_row from nomad_floria.newsletter_subscribers where id = p_subscriber_id for update;
@@ -408,7 +358,7 @@ declare v_row nomad_floria.inquiries; v_from text;
 begin
   select * into v_row from nomad_floria.inquiries where id = p_id for update;
   if not found then raise exception 'set_inquiry_status: not found' using errcode = 'P0002'; end if;
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     if coalesce(nomad_core.organization_role(v_row.organization_id), '') not in ('owner', 'admin', 'editor') then
       raise exception 'set_inquiry_status: not a member' using errcode = '42501';
     end if;
@@ -426,13 +376,14 @@ begin
   update nomad_floria.inquiries set status = p_to, staff_note = coalesce(p_note, staff_note)
    where id = p_id returning * into v_row;
   if v_from is distinct from v_row.status then
-    perform nomad_floria_private.write_audit(v_row.organization_id, 'inquiry.status', 'inquiry', p_id::text,
+    perform nomad_core.write_audit(v_row.organization_id, 'inquiry.status', 'inquiry', p_id::text,
                                              jsonb_build_object('status', v_from), jsonb_build_object('status', v_row.status));
   end if;
   return v_row;
 end;
 $$;
 
+-- 기능 잠금(floria/site)을 일부러 보지 않는다: 구독이 끊긴 조직도 개인정보 삭제 요청은 처리할 수 있어야 한다(owner/admin·서버).
 create function nomad_floria.delete_inquiry(p_id uuid)
 returns void language plpgsql security definer set search_path = ''
 as $$
@@ -440,18 +391,18 @@ declare v_row nomad_floria.inquiries;
 begin
   select * into v_row from nomad_floria.inquiries where id = p_id for update;
   if not found then raise exception 'delete_inquiry: not found' using errcode = 'P0002'; end if;
-  if not nomad_floria_private.is_service_caller()
+  if not nomad_core.is_service_caller()
      and coalesce(nomad_core.organization_role(v_row.organization_id), '') not in ('owner', 'admin') then
     raise exception 'delete_inquiry: owner/admin only' using errcode = '42501';
   end if;
   delete from nomad_floria.inquiries where id = p_id;
   -- 감사 로그에는 개인정보를 남기지 않는다(종류·상태·접수일만)
-  perform nomad_floria_private.write_audit(v_row.organization_id, 'inquiry.delete', 'inquiry', p_id::text,
+  perform nomad_core.write_audit(v_row.organization_id, 'inquiry.delete', 'inquiry', p_id::text,
                                            jsonb_build_object('kind', v_row.kind, 'status', v_row.status, 'created_at', v_row.created_at), null);
 end;
 $$;
 
--- 구독자 삭제 요청: 이메일 원문을 지우고 해시와 해지 상태만 남긴다(재발송 방지 이력)
+-- 구독자 삭제 요청(delete_inquiry와 같이 기능 잠금 없음 — 잠긴 조직도 개인정보 삭제 허용): 이메일 원문을 지우고 해시와 해지 상태만 남긴다(재발송 방지 이력)
 create function nomad_floria.erase_subscriber(p_id uuid)
 returns void language plpgsql security definer set search_path = ''
 as $$
@@ -459,7 +410,7 @@ declare v_row nomad_floria.newsletter_subscribers;
 begin
   select * into v_row from nomad_floria.newsletter_subscribers where id = p_id for update;
   if not found then raise exception 'erase_subscriber: not found' using errcode = 'P0002'; end if;
-  if not nomad_floria_private.is_service_caller()
+  if not nomad_core.is_service_caller()
      and coalesce(nomad_core.organization_role(v_row.organization_id), '') not in ('owner', 'admin') then
     raise exception 'erase_subscriber: owner/admin only' using errcode = '42501';
   end if;
@@ -467,7 +418,7 @@ begin
     update nomad_floria.newsletter_subscribers set status = 'unsubscribed' where id = p_id;
   end if;
   update nomad_floria.newsletter_subscribers set email = null where id = p_id;
-  perform nomad_floria_private.write_audit(v_row.organization_id, 'subscriber.erase', 'subscriber', p_id::text,
+  perform nomad_core.write_audit(v_row.organization_id, 'subscriber.erase', 'subscriber', p_id::text,
                                            jsonb_build_object('status', v_row.status), jsonb_build_object('status', 'unsubscribed'));
 end;
 $$;
@@ -483,7 +434,7 @@ declare v_row nomad_floria.sites; v_before jsonb;
 begin
   select * into v_row from nomad_floria.sites where id = p_site_id for update;
   if not found then raise exception 'update_site_settings: not found' using errcode = 'P0002'; end if;
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     if coalesce(nomad_core.organization_role(v_row.organization_id), '') not in ('owner', 'admin') then
       raise exception 'update_site_settings: owner/admin only' using errcode = '42501';
     end if;
@@ -499,7 +450,7 @@ begin
          accepts_newsletter = coalesce(p_accepts_newsletter, accepts_newsletter),
          privacy_policy_version = coalesce(p_privacy_policy_version, privacy_policy_version)
    where id = p_site_id returning * into v_row;
-  perform nomad_floria_private.write_audit(v_row.organization_id, 'site.settings', 'site', p_site_id::text, v_before,
+  perform nomad_core.write_audit(v_row.organization_id, 'site.settings', 'site', p_site_id::text, v_before,
                                            jsonb_build_object('name', v_row.name, 'accepts_inquiries', v_row.accepts_inquiries,
                                                               'accepts_newsletter', v_row.accepts_newsletter, 'privacy_policy_version', v_row.privacy_policy_version));
   return v_row;
@@ -515,7 +466,7 @@ returns nomad_floria.sites language plpgsql security definer set search_path = '
 as $$
 declare v_row nomad_floria.sites;
 begin
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     raise exception 'provision_site: service_role only' using errcode = '42501';
   end if;
   if not nomad_core.org_has_feature(p_organization_id, 'floria', 'site') then
@@ -524,7 +475,7 @@ begin
   insert into nomad_floria.sites (organization_id, slug, name, brand_key, allowed_origins, notify_email)
   values (p_organization_id, lower(p_slug), p_name, p_brand_key, coalesce(p_allowed_origins, '{}'), p_notify_email)
   returning * into v_row;
-  perform nomad_floria_private.write_audit(p_organization_id, 'site.provision', 'site', v_row.id::text, null,
+  perform nomad_core.write_audit(p_organization_id, 'site.provision', 'site', v_row.id::text, null,
                                            jsonb_build_object('slug', v_row.slug, 'brand_key', v_row.brand_key));
   return v_row;
 end;
@@ -537,7 +488,7 @@ returns jsonb language plpgsql security definer set search_path = ''
 as $$
 declare v_inq integer; v_pending integer; v_unsub integer;
 begin
-  if not nomad_floria_private.is_service_caller() then
+  if not nomad_core.is_service_caller() then
     raise exception 'purge_expired: service_role only' using errcode = '42501';
   end if;
   delete from nomad_floria.inquiries i using nomad_floria.sites s
@@ -551,7 +502,7 @@ begin
    where status = 'unsubscribed' and email is not null and unsubscribed_at < now() - interval '30 days';
   get diagnostics v_unsub = row_count;
   if v_inq + v_pending + v_unsub > 0 then
-    perform nomad_floria_private.write_audit(null, 'site.purge', 'site', null, null,
+    perform nomad_core.write_audit(null, 'site.purge', 'site', null, null,
                                              jsonb_build_object('inquiries', v_inq, 'pending_subscribers', v_pending, 'anonymized_subscribers', v_unsub));
   end if;
   return jsonb_build_object('inquiries', v_inq, 'pending_subscribers', v_pending, 'anonymized_subscribers', v_unsub);
@@ -567,9 +518,7 @@ revoke all on function
   nomad_floria.set_inquiry_status(uuid, text, text), nomad_floria.delete_inquiry(uuid), nomad_floria.erase_subscriber(uuid),
   nomad_floria.update_site_settings(uuid, text, text, boolean, boolean, text),
   nomad_floria.provision_site(uuid, text, text, text, text[], text), nomad_floria.purge_expired(),
-  nomad_floria.inquiry_status_transition(), nomad_floria.newsletter_status_transition(),
-  nomad_floria_private.is_service_caller(), nomad_floria_private.rate_limit_hit(text, int, int),
-  nomad_floria_private.write_audit(uuid, text, text, text, jsonb, jsonb)
+  nomad_floria.inquiry_status_transition(), nomad_floria.newsletter_status_transition()
   from public, anon, authenticated;
 grant execute on function nomad_floria.submit_inquiry(text, text, text, text, text, text, text, text, text, text, integer) to anon, authenticated, service_role;
 grant execute on function
