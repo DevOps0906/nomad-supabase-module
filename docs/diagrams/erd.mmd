@@ -575,6 +575,19 @@ erDiagram
     timestamptz last_used_at
     timestamptz revoked_at
   }
+  audit_log {
+    bigint id PK
+    uuid organization_id
+    uuid actor_id
+    text actor_role
+    text action
+    text target_type
+    text target_id
+    jsonb before
+    jsonb after
+    jsonb metadata
+    timestamptz created_at
+  }
   organizations ||--o{ memberships : "organization_id"
   products ||--o{ plans : "product_code"
   products ||--o{ features : "product_code"

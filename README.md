@@ -19,6 +19,7 @@
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
 | `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감·멤버 관리 검증 |
 | `tests/services_access.sql` | 서비스 11개의 RLS·권한·업체/사용자 격리 검증 |
+| `tests/audit.sql` | 감사 로그 추가 전용·서버만 쓰기·owner/admin 자기 조직 읽기 검증 |
 | [설치와 통합](docs/INTEGRATION.md) | 기존 제품에 가져오는 방법, 기능 이용권 계약 |
 | [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구의 절차 |
 | [`blueprints/`](blueprints/README.md) | 서비스별 DB 청사진 (조직형 7 · 개인형 4 확정, 격리형 2 초안) |
