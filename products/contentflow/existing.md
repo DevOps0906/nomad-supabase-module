@@ -40,8 +40,8 @@
 | invite_member | 대체 | nomad_core.create_invitation | web `/api/team/invite` | (target_organization, invitee_email, invitee_role) → token |
 | accept_invitation(inv) | 대체 | nomad_core.accept_invitation(invite_token) | web `/api/team/invitations/[id]/accept` | id 대신 token |
 | delete_invitation | 대체(일부) | nomad_core.revoke_invitation(owner/admin만) | web `/api/team/invitations/[id]` | 초대받은 사람의 거절은 core에 없음 |
-| my_invitations | core에 없음 | — | web `/api/invitations` | 팀장 확인: 이메일 기준 받은 초대 목록 |
-| change_member_role · remove_member | core에 없음 | — | web `/api/team/members/[userId]` | 팀장 확인: core 멤버 관리 RPC 추가 여부 |
+| my_invitations · decline_invitation | 대체:nomad_core | public.nomad_my_invitations · nomad_decline_invitation | web `/api/invitations` | core 20261119000300 추가 |
+| change_member_role · remove_member | 대체:nomad_core | public.nomad_change_member_role · nomad_remove_member | web `/api/team/members/[userId]` | core 20261119000300 추가(마지막 owner 보호) |
 | workspace_members(ws) | 이관 | nomad_contentflow.workspace_members(ws) | web `/api/team`·`/improvements`·`/site-checks` | 반환 user_id,email,role,is_reviewer (created_at 제거) |
 | rate_limit_hit | 이관 | nomad_contentflow.rate_limit_hit | web lib/server.ts | anon 실행 허용, private 표 사용 |
 | article_delivery_check | 이관 | nomad_contentflow.article_delivery_check | web lib/delivery.ts | invoker 유지(RLS가 글 범위 결정) |
@@ -58,5 +58,5 @@
 
 ## 팀장 확인 필요
 1. reviewer 역할이 nomad_core에 없음 → 제품 표 reviewers로 보강함(core에 역할 추가 vs 현행 유지).
-2. core에 my_invitations·change_member_role·remove_member·초대 거절 부재 → core 추가 또는 제품 RPC.
+2. (해결) core 20261119000300에 my_invitations·decline_invitation·change_member_role·remove_member 추가.
 3. plan_limits 키 3종과 플랜 A/B/C 수치 매핑은 운영자가 정함.
