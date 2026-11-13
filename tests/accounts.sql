@@ -204,4 +204,83 @@ do $$ begin
   if public.nomad_credit_balance((select v::uuid from t_ctx where k = 'team')) <> 0 then raise exception 'viewer balance'; end if;
 end $$;
 
+reset role;
+-- 소셜 로그인 가입 · 사진 · 익명 전환 · 테마
+insert into auth.users (id, email, email_confirmed_at, is_anonymous, raw_user_meta_data) values
+ ('00000000-0000-4000-8000-0000000000b1', 'gina@example.test', now(), false, '{"full_name":"구글 지나","picture":"https://img.example.test/g.png"}'),
+ ('00000000-0000-4000-8000-0000000000b2', null, null, false, '{"nickname":"카카오닉","avatar_url":"https://img.example.test/k.png"}'),
+ ('00000000-0000-4000-8000-0000000000b3', null, null, false, '{"name":"네이버 나","avatar_url":"javascript:alert(1)","picture":"http://img.example.test/n.png"}'),
+ ('00000000-0000-4000-8000-0000000000b4', null, null, true, '{"name":"전환 예정","picture":"https://img.example.test/c.png"}'),
+ ('00000000-0000-4000-8000-0000000000b5', null, null, false, '{"name":"공백 사진","avatar_url":"https://img.example.test/a b.png"}');
+
+do $$
+declare p nomad_core.profiles;
+begin
+  -- 구글: 이메일 앞부분이 full_name보다 우선(기존 규칙 유지), 사진 저장
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b1';
+  if not found or p.display_name is distinct from 'gina' or p.avatar_url is distinct from 'https://img.example.test/g.png' or p.theme is distinct from 'system'
+  then raise exception 'google signup profile wrong: %', p; end if;
+  -- 카카오 무이메일: nickname, avatar_url
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b2';
+  if not found or p.display_name is distinct from '카카오닉' or p.avatar_url is distinct from 'https://img.example.test/k.png'
+  then raise exception 'kakao signup profile wrong: %', p; end if;
+  -- 네이버 메타데이터: name, 잘못된 사진(javascript:, http:)은 무시
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b3';
+  if not found or p.display_name is distinct from '네이버 나' or p.avatar_url is not null
+  then raise exception 'naver signup/avatar sanitize wrong: %', p; end if;
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b5';
+  if not found or p.display_name is distinct from '공백 사진' or p.avatar_url is not null
+  then raise exception 'avatar with whitespace must be ignored: %', p; end if;
+  -- 익명: 프로필·조직 없음 → 정식 전환 시 같은 프로비저닝
+  if exists (select 1 from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b4')
+  then raise exception 'anonymous must not be provisioned'; end if;
+end $$;
+
+update auth.users set is_anonymous = false, email = 'conv@example.test', email_confirmed_at = now()
+where id = '00000000-0000-4000-8000-0000000000b4';
+do $$
+begin
+  if (select display_name from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b4') is distinct from '전환 예정'
+     or (select avatar_url from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b4') is null
+     or (select count(*) from nomad_core.memberships m join nomad_core.organizations o on o.id = m.organization_id
+         where m.user_id = '00000000-0000-4000-8000-0000000000b4' and m.role = 'owner' and o.kind = 'personal') <> 1
+  then raise exception 'anonymous upgrade provisioning failed'; end if;
+  -- 다른 컬럼 갱신으로 중복 프로비저닝되지 않음
+  update auth.users set is_anonymous = false where id = '00000000-0000-4000-8000-0000000000b4';
+  if (select count(*) from nomad_core.memberships where user_id = '00000000-0000-4000-8000-0000000000b4') <> 1
+  then raise exception 'duplicate provisioning'; end if;
+end $$;
+
+-- avatar·theme·이름 길이 제약(서버 쓰기 경로)
+select pg_temp.expect_err($q$update nomad_core.profiles set avatar_url = 'javascript:x' where user_id = '00000000-0000-4000-8000-0000000000a1'$q$, '%profiles_avatar_url_check%');
+select pg_temp.expect_err($q$update nomad_core.profiles set theme = 'neon' where user_id = '00000000-0000-4000-8000-0000000000a1'$q$, '%profiles_theme_check%');
+select pg_temp.expect_err($q$update nomad_core.profiles set display_name = repeat('x', 101) where user_id = '00000000-0000-4000-8000-0000000000a1'$q$, '%profiles_display_name_length%');
+
+-- 테마: 본인만, 유효 값만, 테이블 직접 접근 불가
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+do $$
+begin
+  if (select theme from public.nomad_my_profile()) <> 'system' then raise exception 'default theme must be system'; end if;
+  perform public.nomad_set_my_theme('dark');
+  if (select theme from public.nomad_my_profile()) <> 'dark' then raise exception 'theme update failed'; end if;
+  perform pg_temp.expect_err($q$select public.nomad_set_my_theme('neon')$q$, '%invalid theme%');
+  perform pg_temp.expect_err($q$update nomad_core.profiles set theme = 'light' where user_id = '00000000-0000-4000-8000-0000000000a2'$q$, '%permission denied%');
+  perform pg_temp.expect_err($q$select theme from nomad_core.profiles$q$, '%permission denied%');
+end $$;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a2","role":"authenticated"}', true);
+do $$
+begin
+  perform public.nomad_set_my_theme('light');
+end $$;
+reset role;
+do $$
+begin
+  if (select theme from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000a1') <> 'dark'
+     or (select theme from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000a2') <> 'light'
+  then raise exception 'theme isolation failed'; end if;
+end $$;
+
 rollback;

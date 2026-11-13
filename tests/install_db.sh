@@ -47,7 +47,7 @@ check "완료 문구 ✓" has '✓'
 cp "$T/supabase/nomad.lock" "$TMP/lock1"
 run "$T"
 expect_rc "재실행" 0
-check "재실행 후 파일 수 동일" test "$(ls "$M" | wc -l)" -eq 3
+check "재실행 후 파일 수 동일" test "$(ls "$M" | wc -l)" -eq 5
 check "재실행 '= ' 표시" has '^= '
 
 # 3. --check 최신
@@ -132,7 +132,7 @@ check "core 복사됨" test -n "$(ls "$M9"/*_nomad_core.sql 2>/dev/null)"
 check "core 기본 플랜 파일 복사됨" test -n "$(ls "$M9"/*_nomad_core_default_plan.sql 2>/dev/null)"
 check "다른 제품 파일 없음" test -z "$(ls "$M9" | grep -E '_(contentflow|flora|knowflow|classroom|analytics|sceneflow|commerce|jangter|baedal|personal)\.sql$')"
 check "core 한도 파일 복사됨" test -n "$(ls "$M9"/*_nomad_core_plan_limits.sql 2>/dev/null)"
-check "총 5개 파일(core 3 + humscore 2)" test "$(ls "$M9" | wc -l)" -eq 5
+check "총 7개 파일(core 5 + humscore 2)" test "$(ls "$M9" | wc -l)" -eq 7
 
 # 9. --with-example
 T6="$(mk_target t6)"

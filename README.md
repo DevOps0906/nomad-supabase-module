@@ -10,6 +10,9 @@
 | `supabase/migrations/20261112000200_contentflow_example.sql` | ContentFlow 실습용 제품·플랜·업무 테이블 및 RLS |
 | `supabase/migrations/20261114000100_nomad_core_accounts.sql` | 가입 트리거·1인/팀 조직·초대·조직 크레딧 원장 |
 | `supabase/migrations/20261118000100_nomad_core_plan_limits.sql` | 플랜별 수량 한도 `plan_limits`·한도 조회 함수 (값 시드 없음) |
+| `supabase/migrations/20261119000100_nomad_core_profile_prefs.sql` | 프로필 아바타·테마·`touch_updated_at`·소셜 로그인 중계용 `oauth_states` |
+| `supabase/migrations/20261119000150_nomad_core_accounts.sql` | 소셜 가입 이름·사진 반영·익명→정식 전환 프로비저닝 (`--with-accounts`) |
+| `supabase/migrations/20261119000200_nomad_core_api_credentials.sql` | 조직별 API 키(BYOK) Vault 보관·등록/목록/폐기/서버 복호화 |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
 | `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |

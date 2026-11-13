@@ -72,6 +72,17 @@ service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블
 - 구독 갱신·업그레이드는 구독 레코드를 바꾸고, 단품 결제는 해당 기능 이용권을 추가합니다. 환불된 단품은 구매 상태가 `refunded`인 동안 이용권 검사에서 제외됩니다. 기간이 끝난 이용권도 만료됩니다.
 - 웹·모바일은 결제 성공 화면을 근거로 권한을 올리지 않습니다. 서버 확인 후 카탈로그를 새로 조회합니다.
 
+## 소셜 로그인과 API 키(BYOK)
+
+- 프로필(`20261119000100_nomad_core_profile_prefs.sql`, 모든 설치): `avatar_url`(https만)·`theme`(system·light·dark)·`updated_at`. 본인 조회·테마 변경은 `public.nomad_my_profile()`·`public.nomad_set_my_theme(text)`로만 한다(테이블은 서버 전용). `nomad_core.oauth_states`와 `consume_oauth_state(state)`는 중계 Edge Function(service_role) 전용 1회용 state이며 `redirect_to`는 `/`로 시작하는 상대 경로만 허용한다.
+- 가입(`20261119000150_nomad_core_accounts.sql`, `--with-accounts`): 이름은 `name` → 이메일 앞부분 → `full_name` → `nickname` 순, 사진은 `avatar_url`·`picture` 중 https만 저장. 익명 사용자가 정식 사용자로 전환(`is_anonymous` true→false)하면 같은 프로필·1인 조직 생성을 수행한다.
+- API 키(`20261119000200_nomad_core_api_credentials.sql`, 모든 설치): 원문은 `vault.secrets`(이름 `nomad:<org>:<provider>:<label>:<credential id>`), 메타·마지막 4자리만 `provider_credentials`. 등록·교체·폐기는 owner·admin(`public.nomad_set/revoke_provider_credential`), 목록은 멤버(`public.nomad_list_provider_credentials`). 같은 label로 다시 등록하거나 폐기하면 vault 행을 삭제한다. 복호화 `public.nomad_org_provider_secret`는 service_role(Edge Function) 전용이며 호출 때 `last_used_at`을 갱신한다.
+- state 검증: `state`는 32~256자, `redirect_to`는 `/`로 시작하는 2048자 이하 상대 경로(`//`·`/\`·공백·제어문자 거부)이다. `consume_oauth_state` 뒤 `provider`가 요청과 일치하는지는 호출 측(Edge Function)이 비교한다.
+- 사용자 입력 표시: 표시 이름·조직명은 사용자 입력이므로 화면에서 이스케이프한다. 사진 주소는 https이며 공백·제어문자가 없을 때만 저장한다. API 키는 20자 이상만 받고, 16자 미만이면 last4를 빈 값으로 저장한다.
+- 신뢰 범위(실측): service_role은 `vault.decrypted_secrets`를 직접 select할 수 있다. service_role 키를 가진 서버 코드 전체를 신뢰한다는 전제이며, 이 키는 브라우저·앱에 두지 않는다. authenticated·anon은 테이블·vault를 직접 읽을 수 없다.
+- 계정 연결 원칙: Supabase 기본(검증된 같은 이메일 자동 연결)을 유지한다. 카카오 무이메일·미검증 계정은 연결되지 않는다. 네이버 중계 Edge Function은 네이버 사용자 id로만 사용자를 찾고 이메일로 기존 계정을 찾지 않는다(계정 탈취 방지).
+- 운영: 키 원문이 RPC 인자로 지나가므로 운영 DB의 문장 로그(`log_statement`)는 끈다. `supabase/config.toml`의 `[auth.external.google|kakao]`는 꺼진 틀이며 client id·비밀은 배포 환경 변수로만 넣는다.
+
 ## 검증
 
 로컬 Supabase에서 두 마이그레이션을 적용한 뒤 `tests/tenant_access.sql`을 로컬 DB에 실행합니다. 이 파일은 합성 데이터와 트랜잭션 롤백을 사용합니다. 실제 서비스 연결 시에는 앱에서 로그인한 세션으로 카탈로그 RPC와 Data API를 호출해 같은 결과를 확인합니다.

@@ -550,6 +550,31 @@ erDiagram
     text limit_key PK
     integer limit_value
   }
+  oauth_states {
+    text state PK
+    text provider
+    text redirect_to
+    text nonce
+    timestamptz expires_at
+    timestamptz created_at
+  }
+  api_providers {
+    text code PK
+    text name
+  }
+  provider_credentials {
+    uuid id PK
+    uuid organization_id FK
+    text provider_code FK
+    uuid created_by FK
+    text label
+    uuid secret_id
+    text last4
+    timestamptz created_at
+    timestamptz updated_at
+    timestamptz last_used_at
+    timestamptz revoked_at
+  }
   organizations ||--o{ memberships : "organization_id"
   products ||--o{ plans : "product_code"
   products ||--o{ features : "product_code"
@@ -662,3 +687,5 @@ erDiagram
   readings ||--o{ saved_reports : "user_id"
   trips ||--o{ trip_days : "trip_id"
   plans ||--o{ plan_limits : "product_code"
+  organizations ||--o{ provider_credentials : "organization_id"
+  api_providers ||--o{ provider_credentials : "provider_code"
