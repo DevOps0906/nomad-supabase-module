@@ -17,6 +17,10 @@
 | `supabase/migrations/20261120000100_nomad_core_audit.sql` | 감사 로그 `audit_log`(추가 전용)·`write_audit`·서버 판별 헬퍼 `is_service_caller` |
 | `supabase/migrations/20261120000200_nomad_core_credits.sql` | 크레딧 plan/pack 버킷·consume/refund(멱등·상한)·월 지급/만료(서버 전용) |
 | `supabase/migrations/20261120000300_nomad_core_rate_limit.sql` | 고정 윈도우 레이트 리밋 `rate_limit_hit`·만료 버킷 정리(서버 전용) |
+| `supabase/migrations/20261120000400_nomad_core_jobs.sql` | 작업 큐 `jobs`·클레임/하트비트/재시도·실패·취소 시 크레딧 환불(서버 전용)·`nomad_my_jobs`·`nomad_cancel_job` |
+| `supabase/migrations/20261120000500_nomad_core_ai.sql` | AI 계층(제공자·라우팅·RAG vector(1024)·위키·대화·실행·`ai_usage` cost_krw) — 서버 전용, 사용자 래퍼 없음 |
+| `supabase/migrations/20261120000600_nomad_core_affiliate.sql` | 제휴 링크·클릭·대가성 문구·브랜드커넥트 지원(`brandconnect` 기능 잠금, 조직 일치 복합 FK) |
+| `supabase/migrations/20261120000700_nomad_core_voice.sql` | 음성 세션·작업(제공자·대화 FK, 탈퇴 시 삭제, 녹음 만료 2단계) |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
 | `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
@@ -25,6 +29,10 @@
 | `tests/audit.sql` | 감사 로그 추가 전용·서버만 쓰기·owner/admin 자기 조직 읽기 검증 |
 | `tests/credits.sql` | 크레딧 버킷(plan 먼저→pack)·consume/refund 멱등·환불 상한·월 지급분 만료·서버 전용 검증 |
 | `tests/rate_limit.sql` | 레이트 리밋 한도·윈도우 리셋·긴 윈도우 정리 보존·서버 전용 검증 |
+| `tests/jobs.sql` | 작업 큐 클레임·재시도 백오프·최종 실패/취소 환불(no-op)·reap 반복 안전·사용자 목록/취소 권한 검증 |
+| `tests/ai.sql` | AI 표·함수 사용자 접근 0·라우팅(국외 동의·강제 오픈소스)·벡터 검색 조직 격리·위키 이력 불변 검증 |
+| `tests/affiliate.sql` | 제휴 조직 격리·기능 잠금·클릭 서버 전용·문구 감사·지원서 멱등·상태 전이 검증 |
+| `tests/voice.sql` | 음성 권한·조직 격리·녹음 만료 2단계·탈퇴 삭제·제공자/대화 FK 검증 |
 | [설치와 통합](docs/INTEGRATION.md) | 기존 제품에 가져오는 방법, 기능 이용권 계약 |
 | [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구의 절차 |
 | [`blueprints/`](blueprints/README.md) | 서비스별 DB 청사진 (조직형 7 · 개인형 4 확정, 격리형 2 초안) |

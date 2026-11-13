@@ -596,6 +596,306 @@ erDiagram
     integer count
     timestamptz updated_at
   }
+  jobs {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid credit_ledger_id FK
+    uuid parent_job_id FK
+    uuid created_by FK
+    text queue
+    text job_type
+    jsonb payload
+    jsonb result
+    text status
+    integer priority
+    string more_15_cols
+  }
+  ai_providers {
+    text id PK
+    text name
+    text source
+    text__ kinds
+    boolean cross_border
+    boolean is_active
+    text notes
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  ai_model_prices {
+    uuid id PK
+    text provider_id FK
+    text model
+    text kind
+    text unit
+    numeric credits_per_unit
+    text license
+    boolean is_active
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  ai_routing_settings {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    text feature
+    text kind
+    text mode
+    jsonb chain
+    boolean force_open_source
+    uuid updated_by
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  ai_org_settings {
+    uuid organization_id PK,FK
+    timestamptz cross_border_ack_at
+    text cross_border_notice
+    uuid ack_by
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  ai_collections {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    text embedding_provider FK
+    text kind
+    text name
+    text embedding_model
+    integer embedding_dim
+    text status
+    uuid created_by
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  wiki_pages {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid collection_id
+    text slug
+    text title
+    text summary
+    text body_md
+    text page_type
+    integer version
+    text status
+    text last_editor
+    string more_6_cols
+  }
+  ai_documents {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid collection_id
+    text source_type
+    text title
+    text storage_path
+    text source_url
+    text content_hash
+    text mime
+    bigint byte_size
+    text status
+    string more_6_cols
+  }
+  ai_chunks {
+    bigint id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid document_id
+    uuid collection_id
+    integer chunk_index
+    text content
+    integer token_count
+    vector embedding
+    jsonb metadata
+    timestamptz created_at
+  }
+  wiki_links {
+    uuid organization_id FK
+    uuid from_page_id PK
+    uuid to_page_id PK
+    timestamptz created_at
+  }
+  wiki_revisions {
+    bigint id PK
+    uuid organization_id FK
+    uuid page_id
+    integer version
+    text body_md
+    text editor_kind
+    uuid edited_by
+    text reason
+    uuid__ source_document_ids
+    timestamptz created_at
+  }
+  ai_conversations {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid user_id
+    text visitor_key
+    text dify_user
+    text dify_conversation_id
+    text channel
+    text status
+    text title
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  ai_messages {
+    bigint id PK
+    uuid organization_id FK
+    text provider_id FK
+    uuid credit_ledger_id FK
+    uuid conversation_id
+    text role
+    text content
+    jsonb citations
+    text model
+    integer input_tokens
+    integer output_tokens
+    integer credits
+    string more_1_cols
+  }
+  ai_runs {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    text provider_id FK
+    uuid credit_ledger_id FK
+    text graph
+    text status
+    jsonb input
+    jsonb output
+    text error
+    text model
+    integer input_tokens
+    string more_10_cols
+  }
+  ai_run_steps {
+    bigint id PK
+    uuid organization_id FK
+    text provider_id FK
+    uuid run_id
+    text node
+    text status
+    text model
+    integer tokens
+    jsonb detail
+    timestamptz started_at
+    timestamptz finished_at
+  }
+  ai_usage {
+    bigint id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid credit_ledger_id FK
+    text provider
+    text model
+    text kind
+    text source
+    text feature
+    text purpose
+    integer input_tokens
+    integer output_tokens
+    string more_13_cols
+  }
+  affiliate_accounts {
+    uuid id PK
+    uuid organization_id FK
+    uuid risk_consented_by FK
+    text provider
+    uuid credential_id
+    text partner_id
+    text label
+    text status
+    timestamptz risk_consented_at
+    text last_error
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  affiliate_links {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid created_by FK
+    uuid account_id
+    text provider
+    text source_ref
+    text product_name
+    text original_url
+    text affiliate_url
+    text short_code
+    jsonb utm
+    string more_4_cols
+  }
+  affiliate_clicks {
+    bigint id PK
+    uuid organization_id FK
+    uuid link_id
+    timestamptz clicked_at
+    text referrer
+    text ip_hash
+    text user_agent
+    text country
+  }
+  affiliate_disclosures {
+    uuid id PK
+    uuid organization_id FK
+    uuid updated_by FK
+    text provider
+    text placement
+    text body
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  brandconnect_applications {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid created_by FK
+    uuid account_id
+    text campaign_id
+    text brand_name
+    text product_name
+    text category
+    text target_url
+    text target_kind
+    text message
+    string more_9_cols
+  }
+  voice_sessions {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid user_id FK
+    text stt_provider FK
+    text tts_provider FK
+    uuid conversation_id
+    text visitor_key
+    numeric total_seconds
+    text status
+    timestamptz started_at
+    timestamptz ended_at
+    string more_1_cols
+  }
+  voice_jobs {
+    uuid id PK
+    uuid organization_id FK
+    text product_code FK
+    uuid user_id FK
+    text provider FK
+    uuid credit_ledger_id FK
+    uuid session_id
+    text feature
+    text kind
+    text model
+    text voice_id
+    text status
+    string more_14_cols
+  }
   organizations ||--o{ memberships : "organization_id"
   products ||--o{ plans : "product_code"
   products ||--o{ features : "product_code"
@@ -710,4 +1010,68 @@ erDiagram
   plans ||--o{ plan_limits : "product_code"
   organizations ||--o{ provider_credentials : "organization_id"
   api_providers ||--o{ provider_credentials : "provider_code"
+  organizations ||--o{ jobs : "organization_id"
+  products ||--o{ jobs : "product_code"
+  credit_ledger ||--o{ jobs : "credit_ledger_id"
+  jobs ||--o{ jobs : "parent_job_id"
+  ai_providers ||--o{ ai_model_prices : "provider_id"
+  organizations ||--o{ ai_routing_settings : "organization_id"
+  products ||--o{ ai_routing_settings : "product_code"
+  organizations ||--o{ ai_org_settings : "organization_id"
+  organizations ||--o{ ai_collections : "organization_id"
+  products ||--o{ ai_collections : "product_code"
+  ai_providers ||--o{ ai_collections : "embedding_provider"
+  organizations ||--o{ wiki_pages : "organization_id"
+  products ||--o{ wiki_pages : "product_code"
+  ai_collections ||--o{ wiki_pages : "collection_id"
+  organizations ||--o{ ai_documents : "organization_id"
+  products ||--o{ ai_documents : "product_code"
+  ai_collections ||--o{ ai_documents : "collection_id"
+  wiki_pages ||--o{ ai_documents : "wiki_page_id"
+  organizations ||--o{ ai_chunks : "organization_id"
+  products ||--o{ ai_chunks : "product_code"
+  ai_documents ||--o{ ai_chunks : "document_id"
+  organizations ||--o{ wiki_links : "organization_id"
+  wiki_pages ||--o{ wiki_links : "from_page_id"
+  wiki_pages ||--o{ wiki_links : "to_page_id"
+  organizations ||--o{ wiki_revisions : "organization_id"
+  wiki_pages ||--o{ wiki_revisions : "page_id"
+  organizations ||--o{ ai_conversations : "organization_id"
+  products ||--o{ ai_conversations : "product_code"
+  organizations ||--o{ ai_messages : "organization_id"
+  ai_providers ||--o{ ai_messages : "provider_id"
+  credit_ledger ||--o{ ai_messages : "credit_ledger_id"
+  ai_conversations ||--o{ ai_messages : "conversation_id"
+  organizations ||--o{ ai_runs : "organization_id"
+  products ||--o{ ai_runs : "product_code"
+  ai_providers ||--o{ ai_runs : "provider_id"
+  credit_ledger ||--o{ ai_runs : "credit_ledger_id"
+  organizations ||--o{ ai_run_steps : "organization_id"
+  ai_providers ||--o{ ai_run_steps : "provider_id"
+  ai_runs ||--o{ ai_run_steps : "run_id"
+  organizations ||--o{ ai_usage : "organization_id"
+  products ||--o{ ai_usage : "product_code"
+  credit_ledger ||--o{ ai_usage : "credit_ledger_id"
+  organizations ||--o{ affiliate_accounts : "organization_id"
+  provider_credentials ||--o{ affiliate_accounts : "credential_id"
+  organizations ||--o{ affiliate_links : "organization_id"
+  products ||--o{ affiliate_links : "product_code"
+  affiliate_accounts ||--o{ affiliate_links : "account_id"
+  organizations ||--o{ affiliate_clicks : "organization_id"
+  affiliate_links ||--o{ affiliate_clicks : "link_id"
+  organizations ||--o{ affiliate_disclosures : "organization_id"
+  organizations ||--o{ brandconnect_applications : "organization_id"
+  products ||--o{ brandconnect_applications : "product_code"
+  affiliate_accounts ||--o{ brandconnect_applications : "account_id"
+  jobs ||--o{ brandconnect_applications : "job_id"
+  organizations ||--o{ voice_sessions : "organization_id"
+  products ||--o{ voice_sessions : "product_code"
+  ai_providers ||--o{ voice_sessions : "stt_provider"
+  ai_providers ||--o{ voice_sessions : "tts_provider"
+  ai_conversations ||--o{ voice_sessions : "conversation_id"
+  organizations ||--o{ voice_jobs : "organization_id"
+  products ||--o{ voice_jobs : "product_code"
+  ai_providers ||--o{ voice_jobs : "provider"
+  credit_ledger ||--o{ voice_jobs : "credit_ledger_id"
+  voice_sessions ||--o{ voice_jobs : "session_id"
   credit_ledger ||--o{ credit_ledger : "refund_of"
