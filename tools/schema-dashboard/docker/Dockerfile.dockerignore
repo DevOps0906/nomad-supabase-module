@@ -1,0 +1,10 @@
+# 빌드 컨텍스트(tools/schema-dashboard)에서 제외: 비밀·생성 데이터(런타임 읽기 전용 마운트)
+.env
+.env.*
+*.key
+*.pem
+data
+docker
+!docker/nginx.conf
+DESIGN.md
+shots
