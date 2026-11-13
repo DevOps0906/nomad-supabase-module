@@ -15,6 +15,7 @@
   --color-warning-fg: #ffffff;
   --color-danger: #c13030;
   --color-danger-fg: #ffffff;
+  --color-overlay: rgba(0, 0, 0, 0.45); /* 모달 뒤 배경 */
 
   /* 서체 */
   --font-sans: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;
@@ -43,6 +44,7 @@
   --size-nav: 240px;
   --size-control: 40px;
   --size-code-col: 22ch;
+  --size-dialog-max: 72rem; /* SQL 모달 최대 너비 */
 }
 
 @media (width >= 768px) {
@@ -68,6 +70,7 @@
   --color-warning-fg: #0f1114;
   --color-danger: #f07878;
   --color-danger-fg: #0f1114;
+  --color-overlay: rgba(0, 0, 0, 0.6);
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
 }
 @media (prefers-color-scheme: dark) {
@@ -86,6 +89,7 @@
     --color-warning-fg: #0f1114;
     --color-danger: #f07878;
     --color-danger-fg: #0f1114;
+    --color-overlay: rgba(0, 0, 0, 0.6);
     --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
   }
 }

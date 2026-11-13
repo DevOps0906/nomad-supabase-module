@@ -1,5 +1,5 @@
 "use strict";
-// 정적 대시보드. 데이터: sample-data.json(기본) — ?data=<경로> 로 다른 JSON 지정. 사용자 데이터는 textContent로만 넣는다.
+// 정적 대시보드. 데이터: data/schema.json(생성기 scripts/schema-dashboard.py) 우선, 없으면 sample-data.json — ?data=<경로> 로 지정. 사용자 데이터는 textContent로만 넣는다.
 const VARIANTS = [["existing", "기존"], ["single", "단일"], ["tenant", "테넌트"], ["monorepo", "모노레포"], ["local", "로컬 저장소"]];
 const OWNERS = { user: "user", org: "org", public: "공개", server: "서버", indirect: "간접" };
 const CLIENTS = { web: "웹", app: "앱", desktop: "데스크톱", worker: "워커" };
@@ -19,6 +19,115 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 const badge = (text, kind) => h("span", { class: "badge" + (kind ? " badge--" + kind : "") }, text);
+
+/* ---------- SQL 보기(구문 강조는 span+CSS, 복사·다운로드) ---------- */
+const SQL_KW = new Set(("create alter drop table index unique policy trigger function or replace if not exists on for to using with check " +
+  "select insert update delete from where into values as grant revoke execute all enable disable row level security references primary key foreign " +
+  "default null returns language security definer set search_path begin end return returning cascade restrict constraint add column rename " +
+  "comment is view schema extension type enum do declare loop case when then else and in order by group limit join left inner cross unlogged " +
+  "after before each statement generated always stored identity true false only").split(" "));
+const SQL_TOKEN = /(--[^\n]*)|(\/\*[\s\S]*?\*\/)|('(?:[^']|'')*')|(\$(?:[A-Za-z_]\w*)?\$)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)/g;
+function highlightSql(sql) {
+  const frag = document.createDocumentFragment();
+  const put = (text, cls) => { if (!text) return; if (cls) frag.append(h("span", { class: cls }, text)); else frag.append(document.createTextNode(text)); };
+  let last = 0, m;
+  SQL_TOKEN.lastIndex = 0;
+  while ((m = SQL_TOKEN.exec(sql))) {
+    put(sql.slice(last, m.index));
+    const t = m[0];
+    if (m[1] || m[2]) put(t, "sql-c"); else if (m[3]) put(t, "sql-s"); else if (m[4]) put(t, "sql-d"); else if (m[5]) put(t, "sql-n");
+    else put(t, SQL_KW.has(t.toLowerCase()) ? "sql-k" : null);
+    last = m.index + t.length;
+  }
+  put(sql.slice(last));
+  return frag;
+}
+function copyText(text, btn) {
+  const done = (ok) => { const old = btn.textContent; btn.textContent = ok ? "복사됨" : "복사 실패"; setTimeout(() => { btn.textContent = old; }, 1500); };
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)); return; }
+  const ta = h("textarea", { "aria-hidden": "true", style: "position:fixed;opacity:0" }); ta.value = text; document.body.append(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; } ta.remove(); done(ok);
+}
+function downloadText(text, filename) {
+  const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "application/sql;charset=utf-8" })), download: filename });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const baseName = (p) => String(p).split("/").pop();
+function sqlViewer(title, sql, filename) {
+  const lines = sql.split("\n").length;
+  const code = h("code", {});
+  code.append(highlightSql(sql));
+  const copyBtn = h("button", { type: "button", class: "btn", onclick: () => copyText(sql, copyBtn) }, "복사");
+  return h("div", { class: "sqlview" },
+    h("div", { class: "sqlview__bar" }, h("span", { class: "mono sqlview__title" }, title), h("span", { class: "muted" }, lines + "줄"),
+      copyBtn, filename ? h("button", { type: "button", class: "btn", onclick: () => downloadText(sql, filename) }, "다운로드") : null),
+    h("pre", { class: "sqlview__pre", tabindex: "0", role: "region", "aria-label": title + " SQL 원문" }, code));
+}
+const fileTitle = (f) => f.label || f.path;
+// 구조 선택 → 파일 목록 → 원문. files: [{structure,path,sql,label?,filename?}] — 구조가 하나면 선택 상자를 숨긴다
+
+function filePanel(files, structures, bundles) {
+  const st = { structure: structures[0][0], idx: 0 };
+  const host = h("div", { class: "filepanel" });
+  const draw = () => {
+    const list = files.filter((f) => f.structure === st.structure);
+    if (st.idx >= list.length) st.idx = 0;
+    const cur = list[st.idx];
+    const bl = (bundles || []).filter((b) => b.structure === st.structure);
+    host.replaceChildren(...[
+      structures.length < 2 && !bl.length ? null : h("div", { class: "filters" },
+        structures.length < 2 ? null : h("label", {}, "구조", h("select", { onchange: (e) => { st.structure = e.target.value; st.idx = 0; draw(); } },
+          structures.map(([k, l]) => h("option", { value: k, selected: k === st.structure }, l + " (" + files.filter((f) => f.structure === k).length + ")")))),
+        bl.map((b) => h("a", { class: "btn", href: b.file, download: baseName(b.file) }, "구조별 전체 SQL 다운로드 (" + b.files + "파일 · " + Math.round(b.bytes / 1024) + " KiB)"))),
+      list.length ? h("div", { class: "filepanel__grid" },
+        h("ul", { class: "filelist", "aria-label": "SQL 파일 목록" }, list.map((f, i) => h("li", {},
+          h("button", { type: "button", "aria-current": i === st.idx ? "true" : false, onclick: () => { st.idx = i; draw(); } }, f.label || baseName(f.path))))),
+        h("div", { class: "filepanel__view" }, sqlViewer(fileTitle(cur), cur.sql, cur.filename || baseName(cur.path)))) : h("div", { class: "empty" }, "이 구조에는 SQL 파일이 없습니다.")].filter(Boolean));
+  };
+  draw();
+  return host;
+}
+
+// SQL 카드 격자. groups: [{name, mono?, items:[{title,sub?,desc?,sql,filename}]}]
+const countRe = (sql, re) => (sql.match(re) || []).length;
+function sqlStats(sql) {
+  return [["테이블", /\bcreate\s+(?:unlogged\s+)?table\b/gi], ["함수", /\bcreate\s+(?:or\s+replace\s+)?function\b/gi], ["정책", /\bcreate\s+policy\b/gi]]
+    .map(([l, re]) => [l, countRe(sql, re)]).filter(([, n]) => n > 0);
+}
+function sqlSummary(sql) {
+  // 첫 한국어/설명 주석 줄(되돌림 안내 제외)을 카드 요약으로
+  for (const line of sql.split("\n")) {
+    const m = line.match(/^\s*--\s*(.+)$/);
+    if (m && !/^되돌림/.test(m[1]) && !/^[─=\-\s]+$/.test(m[1])) return m[1].replace(/^[─\s]+|[─\s]+$/g, "");
+  }
+  return "";
+}
+function sqlCards(groups) {
+  // 카드를 누르면 모달 대화상자(<dialog>)로 원문이 바로 열린다. Esc·닫기·바깥 클릭으로 닫고, 닫으면 누른 카드로 포커스가 돌아간다
+  const dlg = h("dialog", { class: "sqldialog", "aria-label": "SQL 원문" });
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  let trigger = null;
+  dlg.addEventListener("close", () => { dlg.replaceChildren(); if (trigger && trigger.isConnected) trigger.focus(); });
+  const open = (item, btn) => {
+    trigger = btn;
+    const viewer = sqlViewer(item.title, item.sql, item.filename);
+    const closeBtn = h("button", { type: "button", class: "btn", onclick: () => dlg.close() }, "닫기");
+    viewer.querySelector(".sqlview__bar").append(closeBtn);
+    dlg.replaceChildren(viewer);
+    dlg.showModal();
+    closeBtn.focus();
+  };
+  const card = (item, mono) => h("li", {}, h("button", { type: "button", class: "sqlcard", "aria-haspopup": "dialog", onclick: (e) => open(item, e.currentTarget) },
+    h("span", { class: "sqlcard__title" + (mono ? " mono" : "") }, item.title),
+    item.sub ? h("span", { class: "sqlcard__sub muted" }, item.sub) : null,
+    item.desc ? h("span", { class: "sqlcard__desc" }, item.desc) : null,
+    h("span", { class: "sqlcard__meta" }, badge(item.sql.split("\n").length + "줄"), sqlStats(item.sql).map(([l, n]) => badge(l + " " + n)))));
+  return h("div", { class: "sqlcards" },
+    groups.map((g) => g.items.length ? h("section", { class: "sqlcards__group" },
+      h("h3", {}, g.name, h("span", { class: "count muted" }, g.items.length)),
+      h("ul", { class: "sqlcards__grid", "aria-label": g.name }, g.items.map((it) => card(it, g.mono)))) : null),
+    dlg);
+}
 
 /* ---------- 테마 ---------- */
 function currentTheme() { try { return localStorage.getItem(THEME_KEY) || "system"; } catch (e) { return "system"; } }
@@ -87,7 +196,7 @@ function tableRow(t) {
     t.sync ? badge("동기화 updated_at·deleted_at", "warn") : null,
   ];
   const cols = t.columns || [];
-  const body = h("div", { class: "row__body" },
+  const info = h("div", {},
     h("dl", {}, h("dt", {}, "출처"), h("dd", { class: "mono" }, t.source_file || "-"),
       t.comment ? [h("dt", {}, "설명"), h("dd", {}, t.comment)] : null),
     h("h4", {}, "컬럼 (" + cols.length + ")"),
@@ -100,6 +209,16 @@ function tableRow(t) {
     (t.policies || []).length ? h("div", { class: "scroll", role: "region", "aria-label": t.name + " 정책", tabindex: "0" }, h("table", {},
       h("thead", {}, h("tr", {}, ["이름", "명령", "역할"].map((x) => h("th", { scope: "col" }, x)))),
       h("tbody", {}, t.policies.map((p) => h("tr", {}, h("td", { class: "mono" }, p.name), h("td", {}, p.cmd), h("td", {}, (p.roles || []).join(", "))))))) : h("p", { class: "muted" }, t.rls ? "정책 없음(기본 거부)" : "RLS 꺼짐"));
+  const sqlPane = h("div", { hidden: true });
+  const tabBtn = (label, on) => h("button", { type: "button", "aria-pressed": String(on) }, label);
+  const b1 = tabBtn("구조", true), b2 = tabBtn("SQL", false);
+  const pick = (sqlOn) => {
+    b1.setAttribute("aria-pressed", String(!sqlOn)); b2.setAttribute("aria-pressed", String(sqlOn));
+    info.hidden = sqlOn; sqlPane.hidden = !sqlOn;
+    if (sqlOn && !sqlPane.firstChild) sqlPane.append(t.sql ? sqlViewer(t.schema + "." + t.name, t.sql, t.name + ".sql") : h("p", { class: "muted" }, "SQL 없음(샘플 데이터)"));
+  };
+  b1.addEventListener("click", () => pick(false)); b2.addEventListener("click", () => pick(true));
+  const body = h("div", { class: "row__body" }, h("div", { class: "tabs tabs--sub", role: "group", "aria-label": t.name + " 보기" }, b1, b2), info, sqlPane);
   return h("details", { class: "row" },
     h("summary", {},
       h("span", { class: "row__name" }, h("span", { class: "mono" }, t.name), h("small", {}, t.schema)),
@@ -109,37 +228,82 @@ function tableRow(t) {
 }
 const rowList = (tables, openFirst) => tables.length ? h("div", { class: "rows" }, tables.map((t, i) => { const el = tableRow(t); if (openFirst && i === 0) el.open = true; return el; })) : h("div", { class: "empty" }, "조건에 맞는 테이블이 없습니다.");
 
+function fnRow(f) {
+  const body = h("div", { class: "row__body" });
+  const d = h("details", { class: "row" },
+    h("summary", {}, h("span", { class: "row__name" }, h("span", { class: "mono" }, f.name), h("small", {}, f.schema)),
+      h("span", { class: "row__meta" }, f.security_definer ? badge("definer", "warn") : null, (f.grants || []).map((g) => badge(g)))), body);
+  d.addEventListener("toggle", () => { if (d.open && !body.firstChild) body.append(f.sql ? sqlViewer(f.schema + "." + f.name, f.sql, f.name + ".sql") : h("p", { class: "muted" }, "SQL 없음(샘플 데이터)")); });
+  return d;
+}
+
 /* ---------- 화면 ---------- */
-function viewCore() {
+// 영역 SQL = 그 영역 테이블 SQL + 함수 본문을 이어 붙인 것(생성기가 sql을 넣은 경우만, 없으면 "")
+const areaSql = (a) => [...a.tables, ...(a.functions || [])].filter((x) => x.sql)
+  .map((x) => "-- ===== " + x.schema + "." + x.name + " =====\n" + x.sql.replace(/\s+$/, "") + "\n").join("\n");
+function viewCore(r) {
   const areas = state.data.core.areas;
   const all = areas.flatMap((a) => a.tables);
+  const files = state.data.core.files || [];
+  const isSql = r.slug === "sql" && files.length > 0;
+  const tabs = h("div", { class: "tabs", role: "group", "aria-label": "보기" },
+    h("button", { type: "button", "aria-pressed": String(!isSql), onclick: () => go("#core") }, "영역", h("span", { class: "count muted" }, areas.length)),
+    files.length ? h("button", { type: "button", "aria-pressed": String(isSql), onclick: () => go("#core/sql") }, "SQL 카드", h("span", { class: "count muted" }, files.length)) : null);
+  const head = h("div", { class: "page-head" }, h("h2", {}, "공용 모듈 nomad_core"), h("p", {}, "영역별 카드 · 테이블 " + all.length + "개 · migrations " + files.length + "개"));
+  if (isSql) {
+    state.redraw = () => {};
+    // 전체: 파일명 순(=적용 순서)으로 이어 붙인 원문
+    const joined = files.map((f) => "-- ===== " + baseName(f.path) + " =====\n" + f.sql.replace(/\s+$/, "") + "\n").join("\n");
+    const fileItems = [{ title: "nomad_core_all.sql", sub: "전체 · 적용 순서대로 합침", desc: "migrations " + files.length + "개를 파일명 순으로 이어 붙인 원문", sql: joined, filename: "nomad_core_all.sql" },
+      ...files.map((f) => ({ title: baseName(f.path), sub: f.path.replace(/\/[^/]*$/, ""), desc: sqlSummary(f.sql), sql: f.sql, filename: baseName(f.path) }))];
+    const areaItems = areas.map((a, i) => {
+      const sql = areaSql(a);
+      return sql ? { title: a.name, sub: "영역 · 테이블 " + a.tables.length + " · 함수 " + (a.functions || []).length, sql, filename: "nomad_core_area_" + (i + 1) + ".sql" } : null;
+    }).filter(Boolean);
+    return [head, tabs, h("div", {}, sqlCards([{ name: "migrations 파일", items: fileItems, mono: true }, { name: "영역별 SQL", items: areaItems }]))];
+  }
   const draw = () => {
     host.replaceChildren(h("div", { class: "cards" }, areas.map((a) => {
       const ts = a.tables.filter(matches);
       if (!ts.length && (state.q || Object.values(state.filters).some(Boolean))) return null;
+      const sql = areaSql(a);
+      const paneId = "area-sql-" + (areas.indexOf(a) + 1);
+      const pane = h("div", { class: "card__sql", id: paneId, hidden: true });
+      const sqlBtn = sql ? h("button", { type: "button", class: "btn card__sqlbtn", "aria-expanded": "false", "aria-controls": paneId }, "SQL 보기") : null;
+      if (sqlBtn) sqlBtn.addEventListener("click", () => {
+        const on = pane.hidden;
+        pane.hidden = !on; sqlBtn.setAttribute("aria-expanded", String(on)); sqlBtn.textContent = on ? "SQL 닫기" : "SQL 보기";
+        if (on && !pane.firstChild) pane.append(sqlViewer("nomad_core · " + a.name, sql, "nomad_core_area_" + (areas.indexOf(a) + 1) + ".sql"));
+      });
       return h("section", { class: "card" },
-        h("h3", {}, a.name, badge(a.tables.length + " 테이블"), badge((a.functions || []).length + " 함수")),
+        h("h3", {}, a.name, badge(a.tables.length + " 테이블"), badge((a.functions || []).length + " 함수"), sqlBtn),
+        pane,
         rowList(ts),
-        (a.functions || []).length ? [h("h4", {}, "함수"), h("div", { class: "fnlist" }, a.functions.map((f) =>
-          h("span", { class: "badge", title: f.grants.join(", ") }, h("span", { class: "mono" }, f.name), f.security_definer ? " · definer" : "", " · " + f.grants.join("/"))))] : null);
+        (a.functions || []).length ? [h("h4", {}, "함수 (" + a.functions.length + ")"), h("div", { class: "rows" }, a.functions.map(fnRow))] : null);
     })));
   };
-  const host = h("div");
+  const host = h("div", {});
   state.redraw = draw; draw();
-  return [h("div", { class: "page-head" }, h("h2", {}, "공용 모듈 nomad_core"), h("p", {}, "영역별 카드 · 테이블 " + all.length + "개")), filterBar(all, draw), host];
+  return [head, tabs, filterBar(all, draw), host];
 }
 
 function viewProduct(r) {
   const p = state.data.products.find((x) => x.slug === r.slug);
   if (!p) return h("div", { class: "notice" }, "알 수 없는 제품: " + r.slug);
   const tab = VARIANTS.some(([k]) => k === r.tab) ? r.tab : "existing";
-  const tabs = h("div", { class: "tabs", role: "tablist", "aria-label": "구조" }, VARIANTS.map(([k, label]) => {
+  const isSql = r.tab === "sql" && (p.files || []).length > 0;
+  const tabs = h("div", { class: "tabs", role: "group", "aria-label": "구조" }, VARIANTS.map(([k, label]) => {
     const n = k === "local" ? p.local_storage.length : (p.variants[k] || { tables: [] }).tables.length;
-    return h("button", { type: "button", role: "tab", "aria-selected": String(k === tab), onclick: () => go("#product/" + p.slug + "/" + k) }, label, h("span", { class: "count muted" }, n));
-  }));
-  const host = h("div", { role: "tabpanel" });
+    return h("button", { type: "button", "aria-pressed": String(!isSql && k === tab), onclick: () => go("#product/" + p.slug + "/" + k) }, label, h("span", { class: "count muted" }, n));
+  }), (p.files || []).length ? h("button", { type: "button", "aria-pressed": String(isSql), onclick: () => go("#product/" + p.slug + "/sql") }, "SQL 파일", h("span", { class: "count muted" }, p.files.length)) : null);
+  const host = h("div", {});
   let tables = [];
-  if (tab === "local") {
+  if (isSql) {
+    state.redraw = () => {};
+    const bundles = (state.data.bundles || []).filter((b) => b.slug === p.slug || b.structure === "monorepo");
+    const structs = VARIANTS.slice(0, 4).filter(([k]) => p.files.some((f) => f.structure === k) || bundles.some((b) => b.structure === k));
+    host.append(filePanel(p.files, structs, bundles));
+  } else if (tab === "local") {
     state.redraw = () => {};
     host.append(localTable(p));
   } else {
@@ -150,7 +314,7 @@ function viewProduct(r) {
   }
   return [
     h("div", { class: "page-head" }, h("h2", {}, p.name), badge(p.form === "org" ? "org형" : "user형", "accent"), (p.clients || []).map((c) => badge(CLIENTS[c] || c)), p.placeholder ? badge("자리표시", "warn") : null, h("p", {}, "레포 " + p.repo + " · " + p.note)),
-    tabs, tab === "local" ? null : filterBar(tables, () => state.redraw()), host];
+    tabs, isSql || tab === "local" ? null : filterBar(tables, () => state.redraw()), host];
 }
 
 function localTable(p) {
@@ -182,8 +346,10 @@ function render() {
   if (!state.data) return;
   const r = route();
   renderNav(r);
-  const view = r.type === "product" ? viewProduct(r) : r.type === "compare" ? viewCompare() : viewCore();
-  $main.replaceChildren(...[view].flat());
+  const view = r.type === "product" ? viewProduct(r) : r.type === "compare" ? viewCompare() : viewCore(r);
+  $main.replaceChildren(...[view].flat().filter(Boolean));
+  const sel = $main.querySelector('.tabs [aria-pressed="true"]'); // 좁은 화면에서 가로 스크롤 밖의 현재 탭을 보이게
+  if (sel) sel.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 function showError(err) {
   $main.replaceChildren(h("div", { class: "notice", role: "alert" },
@@ -195,6 +361,7 @@ document.getElementById("q").addEventListener("input", (e) => { state.q = e.targ
 window.addEventListener("hashchange", () => { state.filters = { schema: "", owner: "", noRls: false, client: "" }; render(); $main.focus(); });
 
 const dataParam = new URLSearchParams(location.search).get("data");
-const src = dataParam && /^[\w./-]+\.json$/.test(dataParam) && !dataParam.startsWith("/") ? dataParam : "sample-data.json";
-fetch(src).then((res) => { if (!res.ok) throw new Error("HTTP " + res.status + " " + src); return res.json(); })
+const okParam = dataParam && /^[\w./-]+\.json$/.test(dataParam) && !dataParam.startsWith("/");
+const fetchJson = (src) => fetch(src).then((res) => { if (!res.ok) throw new Error("HTTP " + res.status + " " + src); return res.json(); });
+(okParam ? fetchJson(dataParam) : fetchJson("data/schema.json").catch(() => fetchJson("sample-data.json")))
   .then((d) => { state.data = d; render(); }).catch(showError);

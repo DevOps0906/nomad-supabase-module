@@ -31,3 +31,9 @@ F = {schema,name,security_definer:bool,grants:["authenticated",…]}
 ## 완료 조건
 - 1단계: 컨테이너로 띄워 sample-data로 3구간·라이트/다크 스크린샷(`~/.claude/nomad/bin/shot` 있으면 사용) → 사용자 확인
 - 2단계(확인 후): 생성기가 5개 레포 기존 migrations + products/ + core를 파싱, 테이블 수가 조사 수치와 맞음
+
+## 2단계 (2026-11-13 사용자: "가장 중요한 건 SQL문") — 실제 데이터 + SQL 보기
+- 생성기 `scripts/schema-dashboard.py`(표준 라이브러리만): 파싱 대상 = core(`supabase/migrations/*_nomad_core*.sql`) · products/<slug>/{user,org,app}/*.sql · 각 레포 기존 `supabase/migrations`(경로는 products/<slug>/existing.md 머리 또는 survey 문서) · bundles/(있으면).
+- schema.json에 추가: 테이블마다 `sql`(create table 문 + 그 테이블의 alter/index/policy/trigger/grant 문), 함수마다 `sql`(본문 전체). `files:[{structure,path,sql}]`로 구조별 파일 원문.
+- 화면: 테이블 펼침에 "SQL" 탭(구문 강조는 CSS만, 복사 버튼) · 제품 화면에 "SQL 파일" 탭(구조 선택 → 파일 목록 → 원문·복사·다운로드) · 공용 모듈 화면도 같은 방식 · 번들이 있으면 "구조별 전체 SQL 다운로드(단일·테넌트·모노레포)".
+- 비밀 없음 확인(생성 시 `sk-`·`eyJ`·`service_role` 키 패턴 있으면 실패).

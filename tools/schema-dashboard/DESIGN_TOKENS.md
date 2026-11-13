@@ -17,6 +17,7 @@
 | `--color-warning-fg` | `#ffffff` | `#0f1114` |
 | `--color-danger` | `#c13030` | `#f07878` |
 | `--color-danger-fg` | `#ffffff` | `#0f1114` |
+| `--color-overlay` | `rgba(0, 0, 0, 0.45)` | `rgba(0, 0, 0, 0.6)` |
 
 ## 글자 크기 (반응형 3구간)
 | 토큰 | 모바일 ~767 | 태블릿 768~1199 | 데스크톱 1200~ |
@@ -47,3 +48,4 @@
 | `--size-nav` | `240px` |
 | `--size-control` | `40px` |
 | `--size-code-col` | `22ch` |
+| `--size-dialog-max` | `72rem` |

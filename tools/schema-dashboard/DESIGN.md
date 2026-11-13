@@ -12,6 +12,7 @@
 - 공용 모듈: 영역 카드 5개(계정·조직 / 플랜·기능·한도 / 구독·이용권·크레딧 / 인증·소셜 로그인 / API 키) → 테이블 행 + 함수 배지.
 - 제품: 탭 [기존 | 단일 | 테넌트 | 모노레포 | 로컬 저장소]. 행 = 이름 · 소유 · RLS · 사용처 · 동기화 · 기존→새 이름. 행을 펼치면 컬럼·정책·출처.
 - 비교: 제품 × 구조 테이블 수 매트릭스. 필터: 스키마·소유·사용처·RLS 없음, 검색은 테이블·컬럼명.
+- 공용 모듈 SQL 카드(`#core/sql`): migrations 파일·영역별 SQL을 카드 격자(1/2/3열)로, 카드(button) 클릭 → `<dialog>` 모달에 SQL 원문(강조·복사·다운로드), 닫으면 카드로 포커스 복귀. 배경 `--color-overlay`, 폭 `--size-dialog-max`.
 - 라우팅: `#core` · `#product/<slug>/<탭>` · `#compare`.
 
 ## 3. 반응형 3구간 폰트 표
@@ -32,7 +33,7 @@
 - 대비 검사 `design-preview tokens.css --check` 전부 통과(본문 4.5:1, 입력 경계 3:1).
 
 ## 5. 접근성·검사 메모
-- 키보드: 건너뛰기 링크, 내비·탭·행(details/summary) 모두 Tab·Enter·Space, 가로 스크롤 표는 `tabindex=0` 영역. 포커스 링 `--focus-width`. `prefers-reduced-motion` 시 전환 없음.
+- 키보드: 건너뛰기 링크, 내비·탭(버튼 그룹 `role=group` + `aria-pressed`)·행(details/summary) 모두 Tab·Enter·Space, 가로 스크롤 표는 `tabindex=0` 영역. 포커스 링 `--focus-width`. `prefers-reduced-motion` 시 전환 없음.
 - `design-preview --scan`의 px 4건은 `@media (width >= 768px/1200px)` 구간 경계뿐(CSS 변수를 미디어 쿼리에 쓸 수 없음). 그 외 hex·px 직접 사용 0건.
 - 데이터는 DOM `textContent`로만 삽입(innerHTML 미사용).
 
