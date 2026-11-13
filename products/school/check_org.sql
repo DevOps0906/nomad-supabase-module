@@ -95,7 +95,7 @@ select zz_check.denied($$insert into nomad_school.attendance (organization_id, c
 -- RPC 교차 거부
 select zz_check.fails_with($$select nomad_school.mark_attendance('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000a4', current_date, 'absent')$$, 'admin/teacher only');
 select zz_check.fails_with($$select nomad_school.dashboard_stats('00000000-0000-0000-0000-00000000000a')$$, 'admin/teacher only');
-select zz_check.fails_with($$select * from nomad_school.attendance_trend('00000000-0000-0000-0000-00000000000a', current_date - 1, current_date)$$, 'admin/teacher only');
+select zz_check.fails_with($$select * from nomad_school.attendance_trend('00000000-0000-0000-0000-00000000000a', (now() at time zone 'Asia/Seoul')::date - 1, (now() at time zone 'Asia/Seoul')::date)$$, 'admin/teacher only');
 select zz_check.fails_with($$select nomad_school.invite_school_member('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a7', 'teacher', 'x')$$, 'admin only');
 select zz_check.fails_with($$select nomad_school.update_workspace_settings('00000000-0000-0000-0000-00000000000a', 'hacked', null, null)$$, 'admin only');
 select zz_check.fails_with($$select nomad_school.student_summary('00000000-0000-0000-0000-00000000000a')$$, 'no access');
@@ -138,8 +138,8 @@ select zz_check.fails_with($$select nomad_school.set_member_status('00000000-000
 -- 통계·추이
 select zz_check.expect($$select (nomad_school.dashboard_stats('00000000-0000-0000-0000-00000000000a') ->> 'records')::bigint$$, 2);
 select zz_check.expect($$select (nomad_school.dashboard_stats('00000000-0000-0000-0000-00000000000a') ->> 'late')::bigint$$, 1);
-select zz_check.expect($$select count(*) from nomad_school.attendance_trend('00000000-0000-0000-0000-00000000000a', current_date - 30, current_date)$$, 1);
-select zz_check.fails_with($$select * from nomad_school.attendance_trend('00000000-0000-0000-0000-00000000000a', current_date - 32, current_date)$$, 'invalid range');
+select zz_check.expect($$select count(*) from nomad_school.attendance_trend('00000000-0000-0000-0000-00000000000a', (now() at time zone 'Asia/Seoul')::date - 30, (now() at time zone 'Asia/Seoul')::date)$$, 1);
+select zz_check.fails_with($$select * from nomad_school.attendance_trend('00000000-0000-0000-0000-00000000000a', (now() at time zone 'Asia/Seoul')::date - 32, (now() at time zone 'Asia/Seoul')::date)$$, 'invalid range');
 -- 관리자는 날짜 제한 없이 과거 출석 가능, 미래는 불가
 select nomad_school.mark_attendance('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000a4', current_date - 60, 'absent');
 select zz_check.fails_with($$select nomad_school.mark_attendance('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000a4', current_date + 2, 'absent')$$, 'future date');
