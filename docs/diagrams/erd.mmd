@@ -114,6 +114,7 @@ erDiagram
     uuid organization_id FK
     text product_code FK
     uuid created_by FK
+    uuid refund_of FK
     int delta
     text reason
     text idempotency_key
@@ -588,6 +589,13 @@ erDiagram
     jsonb metadata
     timestamptz created_at
   }
+  rate_limit_buckets {
+    text key PK
+    timestamptz window_start
+    timestamptz window_end
+    integer count
+    timestamptz updated_at
+  }
   organizations ||--o{ memberships : "organization_id"
   products ||--o{ plans : "product_code"
   products ||--o{ features : "product_code"
@@ -702,3 +710,4 @@ erDiagram
   plans ||--o{ plan_limits : "product_code"
   organizations ||--o{ provider_credentials : "organization_id"
   api_providers ||--o{ provider_credentials : "provider_code"
+  credit_ledger ||--o{ credit_ledger : "refund_of"

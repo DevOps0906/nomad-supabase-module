@@ -14,12 +14,17 @@
 | `supabase/migrations/20261119000150_nomad_core_accounts.sql` | 소셜 가입 이름·사진 반영·익명→정식 전환 프로비저닝 (`--with-accounts`) |
 | `supabase/migrations/20261119000300_nomad_core_accounts.sql` | 내 초대 목록·초대 거절·멤버 역할 변경·내보내기 (`--with-accounts`) |
 | `supabase/migrations/20261119000200_nomad_core_api_credentials.sql` | 조직별 API 키(BYOK) Vault 보관·등록/목록/폐기/서버 복호화 |
+| `supabase/migrations/20261120000100_nomad_core_audit.sql` | 감사 로그 `audit_log`(추가 전용)·`write_audit`·서버 판별 헬퍼 `is_service_caller` |
+| `supabase/migrations/20261120000200_nomad_core_credits.sql` | 크레딧 plan/pack 버킷·consume/refund(멱등·상한)·월 지급/만료(서버 전용) |
+| `supabase/migrations/20261120000300_nomad_core_rate_limit.sql` | 고정 윈도우 레이트 리밋 `rate_limit_hit`·만료 버킷 정리(서버 전용) |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
 | `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
 | `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감·멤버 관리 검증 |
 | `tests/services_access.sql` | 서비스 11개의 RLS·권한·업체/사용자 격리 검증 |
 | `tests/audit.sql` | 감사 로그 추가 전용·서버만 쓰기·owner/admin 자기 조직 읽기 검증 |
+| `tests/credits.sql` | 크레딧 버킷(plan 먼저→pack)·consume/refund 멱등·환불 상한·월 지급분 만료·서버 전용 검증 |
+| `tests/rate_limit.sql` | 레이트 리밋 한도·윈도우 리셋·긴 윈도우 정리 보존·서버 전용 검증 |
 | [설치와 통합](docs/INTEGRATION.md) | 기존 제품에 가져오는 방법, 기능 이용권 계약 |
 | [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구의 절차 |
 | [`blueprints/`](blueprints/README.md) | 서비스별 DB 청사진 (조직형 7 · 개인형 4 확정, 격리형 2 초안) |
