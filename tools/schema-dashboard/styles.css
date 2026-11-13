@@ -133,19 +133,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sql-c { color: var(--color-text-muted); font-style: italic; }
 .sql-d { color: var(--color-warning); }
 .sql-n { color: var(--color-danger); }
-.filepanel__grid { display: grid; gap: var(--space-3); grid-template-columns: minmax(0, 1fr); }
-.filepanel__view { min-width: 0; }
-.filelist { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-1); overflow-x: auto; }
-.filelist button { width: 100%; text-align: left; padding: var(--space-2) var(--space-3); background: transparent; border: var(--border-width) solid transparent; border-radius: var(--radius-control); cursor: pointer; font: var(--text-caption) / 1.4 var(--font-mono); white-space: nowrap; }
-.filelist button:hover { background: var(--color-surface); }
-.filelist button[aria-current="true"] { background: var(--color-surface); border-color: var(--color-border); color: var(--color-primary); font-weight: 700; }
-@media (width >= 1200px) {
-  .filepanel__grid { grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr); align-items: start; }
-  .filelist { flex-direction: column; overflow: visible; max-height: 70vh; overflow-y: auto; }
-  .filelist button { white-space: normal; overflow-wrap: anywhere; }
-}
 
-/* SQL 카드 격자 (공용 모듈) — 카드를 누르면 아래 보기 영역에 원문 */
+/* SQL 카드 격자 (공용 모듈·제품) — 카드를 누르면 모달(<dialog>)로 원문 */
 .card > h3 .card__sqlbtn { margin-left: auto; font-weight: 400; }
 .card__sql { margin-bottom: var(--space-3); }
 .sqlcards__group { margin-bottom: var(--space-6); }

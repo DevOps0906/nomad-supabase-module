@@ -19,7 +19,7 @@ OUT = ROOT / "tools" / "schema-dashboard" / "data" / "schema.json"
 if "--out" in sys.argv:
     OUT = Path(sys.argv[sys.argv.index("--out") + 1])
 
-PRODUCTS = [  # slug, 이름, 레포, 형태, 사용처
+KNOWN = [  # slug, 이름, 레포, 형태, 사용처 — 레포 기존 migrations가 있는 제품. 그 밖의 products/<slug>/는 discover_products()가 찾는다
     ("humscore", "HumScore", "humscore", "user", ["web", "app", "desktop", "worker"]),
     ("lottolab", "LOTTO-LAB", "LOTTO-LAB", "user", ["app", "desktop", "web", "worker"]),
     ("contentflow", "ContentFlow", "ContentFlow-AI-V2.0", "org", ["web", "worker"]),
@@ -498,6 +498,52 @@ def parse_local_storage(slug):
     return res
 
 
+def discover_products():
+    """KNOWN 순서 뒤에 products/ 아래 나머지 제품(user·org·app 폴더가 있는 디렉터리)을 이름순으로 붙인다.
+    반환: [(slug, 이름, 레포 표기, 형태, 사용처, 기존 SQL 경로 목록, 기존 경로 표기 함수)]"""
+    known = {k[0]: k for k in KNOWN}
+    slugs = [k[0] for k in KNOWN] + sorted(d.name for d in (ROOT / "products").iterdir()
+                                           if d.is_dir() and d.name not in known and any((d / x).is_dir() for x in ("user", "org", "app")))
+    out = []
+    for slug in slugs:
+        if slug in known:
+            _, name, repo, form, clients = known[slug]
+            repo_dir = DEV / repo / "supabase" / "migrations"
+            if not repo_dir.is_dir():
+                print(f"  경고: 기존 레포 migrations 없음 — {repo_dir}", file=sys.stderr)
+            out.append((slug, name, repo, form, clients, sql_files(repo_dir, skip_check=False),
+                        lambda p, r=repo: f"{r}/supabase/migrations/{p.name}"))
+            continue
+        # 이름 = existing.md 제목의 "기존 DB" 앞부분, 원본 = "원본:" 줄의 첫 `경로`(.sql 파일 또는 폴더, 실제로 있을 때만)
+        md = ROOT / "products" / slug / "existing.md"
+        head = read(md) if md.exists() else ""
+        m = re.search(r"^#\s+(.+?)\s+기존 DB", head, re.M)
+        name = m.group(1).strip() if m else slug
+        form = "user" if (ROOT / "products" / slug / "user").is_dir() else "org"
+        clients = ["web"] + (["worker"] if "워커=" in head else [])
+        src, repo = [], "-"
+        m = re.search(r"^원본:\s*`([^`]+)`", head, re.M)
+        if m:
+            sp = Path(m.group(1))
+            if not sp.is_absolute():
+                sp = DEV / sp
+            if sp.is_file() and sp.suffix == ".sql":
+                src = [sp]
+            elif sp.is_dir():
+                src = sql_files(sp, skip_check=False)
+            if src:
+                repo = rel_to(sp, DEV)
+        out.append((slug, name, repo, form, clients, src, lambda p: rel_to(p, DEV)))
+    return out
+
+
+def rel_to(p, base):
+    try:
+        return str(Path(p).relative_to(base)).replace("\\", "/")
+    except ValueError:
+        return Path(p).name
+
+
 def core_area_of(name, tables_by_area, kind):
     for area, names, pat in CORE_AREAS:
         if kind == "t" and name in names:
@@ -527,13 +573,11 @@ def main():
         areas[core_area_of(f["name"], None, "f")]["functions"].append(f)
     core = {"areas": [a for a in areas.values() if a["tables"] or a["functions"]], "files": core_files}
 
-    for slug, name, repo, form, clients in PRODUCTS:
+    products = discover_products()
+    for slug, name, repo, form, clients, ex_paths, ex_label in products:
         pdir = ROOT / "products" / slug
         renames = parse_renames(slug)
-        repo_dir = DEV / repo / "supabase" / "migrations"
-        if not repo_dir.is_dir():
-            print(f"  경고: 기존 레포 migrations 없음 — {repo_dir}", file=sys.stderr)
-        ex_files = build_files("existing", sql_files(repo_dir, skip_check=False), lambda p, r=repo: f"{r}/supabase/migrations/{p.name}")
+        ex_files = build_files("existing", ex_paths, ex_label)
         app = sql_files(pdir / "app")
         single_files = build_files("single", sql_files(pdir / "user") + app)
         tenant_files = build_files("tenant", sql_files(pdir / "org") + app)
@@ -544,13 +588,13 @@ def main():
             variants[key] = {"tables": tabs}
             files.extend(fl)
         prod_out.append({"slug": slug, "name": name, "repo": repo, "form": form, "clients": clients, "placeholder": False,
-                         "note": f"products/{slug}/existing.md · 원본 {len(ex_files)}개 migrations 최종 상태",
+                         "note": f"products/{slug}/existing.md · " + (f"원본 {len(ex_files)}개 SQL 최종 상태" if ex_files else "기존 SQL 없음"),
                          "variants": variants, "local_storage": parse_local_storage(slug), "files": files})
 
     # 번들 전체 SQL (단일·테넌트·모노레포) — 이어 붙여 data/bundles/*.sql 로 쓴다. bundles/ 가 없으면 건너뛴다(화면에서 숨김).
     bundle_texts = {}
-    for structure, slug, folder in [("single", p[0], ROOT / "bundles" / "single" / p[0]) for p in PRODUCTS] + \
-                                   [("tenant", p[0], ROOT / "bundles" / "tenant" / p[0]) for p in PRODUCTS] + \
+    for structure, slug, folder in [("single", p[0], ROOT / "bundles" / "single" / p[0]) for p in products] + \
+                                   [("tenant", p[0], ROOT / "bundles" / "tenant" / p[0]) for p in products] + \
                                    [("monorepo", None, ROOT / "bundles" / "monorepo")]:
         files = sorted((folder / "supabase" / "migrations").glob("*.sql"))
         if not files:
