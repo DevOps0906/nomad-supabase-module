@@ -11,12 +11,12 @@
 | task-007 | knowflow 대화 크레딧 차감을 기능 이용권에 연결 (멱등 키) | W2 | task-004 | 높음 | builder | 대기 |
 | task-008 | 격리형 hospital 확정 (school은 task-009에서 조직형으로 이식) | W2 | task-004 | 높음 | builder | 보류 |
 | task-009 | platform-docs 코어·제품 16개 대응표와 이식 계획 | W2 | task-005 | 보통 | planner | 완료 |
-| task-010 | DB 스키마 대시보드(종류별 분류, 디자인 먼저 → Docker 로컬 서빙, 웨이브마다 갱신) | W2 | — | 낮음 | designer·builder | 진행 |
+| task-010 | DB 스키마 대시보드(종류별 분류, 디자인 먼저 → Docker 로컬 서빙, 웨이브마다 갱신) | W2 | — | 낮음 | designer·builder | 진행(2단계 완료, 웨이브마다 갱신) |
 | task-011 | 공용 모듈 확장: 소셜 로그인(구글·카카오·네이버) · API 키 BYOK(Vault) | W2 | task-006 | 높음 | builder | 완료 |
 | task-012 | 최우선 5개 제품 DB 변환(실제 레포 기준, 단일 user안·테넌트 org안) | W2 | task-006 | 높음 | builder | 완료 |
-| task-013 | 번들 빌더(단일·테넌트·모노레포) 와 구조별 검증 | W2 | task-011·012 | 보통 | builder | 진행 |
-| task-014 | 코어 웨이브(C1 크레딧 버킷·C2 jobs·C3 rate limit·C5 AI·C6 affiliate·C7 voice) | W3 | task-011 | 높음 | builder | 진행(challenger) |
-| task-015 | platform-docs 제품 이식 P1(erp·school·poll·floria) → P2~P4(코어 웨이브 후) | W3 | task-012 | 높음 | builder | 진행 |
+| task-013 | 번들 빌더(단일·테넌트·모노레포) 와 구조별 검증 | W2 | task-011·012 | 보통 | builder | 완료 |
+| task-014 | 코어 웨이브(C1 크레딧 버킷·C2 jobs·C3 rate limit·C5 AI·C6 affiliate·C7 voice) | W3 | task-011 | 높음 | builder | 완료 |
+| task-015 | platform-docs 제품 이식 P1(erp·school·poll·floria) → P2~P4(코어 웨이브 후) | W3 | task-012 | 높음 | builder | 진행(P1 완료) |
 
 상태: 대기 / 진행 / 완료 / 보류
 
