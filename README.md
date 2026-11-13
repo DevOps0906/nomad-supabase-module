@@ -21,6 +21,7 @@
 | `supabase/migrations/20261120000500_nomad_core_ai.sql` | AI 계층(제공자·라우팅·RAG vector(1024)·위키·대화·실행·`ai_usage` cost_krw) — 서버 전용, 사용자 래퍼 없음 |
 | `supabase/migrations/20261120000600_nomad_core_affiliate.sql` | 제휴 링크·클릭·대가성 문구·브랜드커넥트 지원(`brandconnect` 기능 잠금, 조직 일치 복합 FK) |
 | `supabase/migrations/20261120000700_nomad_core_voice.sql` | 음성 세션·작업(제공자·대화 FK, 탈퇴 시 삭제, 녹음 만료 2단계) |
+| `supabase/migrations/20261120000800_nomad_core_followups.sql` | 코어 보완: 결과 전달 표시 `mark_job_delivered`(제품 definer 함수 전용) · 키 폐기 재호출 no-op·서버 호출 허용 |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
 | `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |

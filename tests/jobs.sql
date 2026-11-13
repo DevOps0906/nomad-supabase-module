@@ -1,5 +1,5 @@
 -- 작업 큐 검증: 권한 표 · enqueue 멱등·크레딧 연결 검증 · 클레임(SKIP LOCKED)·하트비트·완료 · 재시도 백오프·최종 실패 환불
---   · 환불 no-op · reap 반복 안전 · 사용자 목록(본문 제외)·취소(생성자/owner·admin, 조직 격리) (합성 데이터, 롤백)
+--   · 환불 no-op · reap 반복 안전 · 결과 전달 표시(mark_job_delivered) · 사용자 목록(본문 제외)·취소(생성자/owner·admin, 조직 격리) (합성 데이터, 롤백)
 \o /dev/null
 begin;
 
@@ -39,7 +39,8 @@ begin
   end loop;
   -- 내부 도우미·환불 본문(서버 판별 없음)은 어떤 API 역할도 직접 실행 불가
   foreach f in array array['nomad_core.refund_job_credits(nomad_core.jobs,text)',
-                           'nomad_core.refund_credits_internal(uuid,text,text,integer)'] loop
+                           'nomad_core.refund_credits_internal(uuid,text,text,integer)',
+                           'nomad_core.mark_job_delivered(uuid)'] loop
     if has_function_privilege('service_role', f, 'execute') or has_function_privilege('authenticated', f, 'execute')
        or has_function_privilege('anon', f, 'execute') or has_function_privilege('public', f, 'execute') then
       raise exception 'internal helper granted: %', f;
@@ -314,6 +315,36 @@ begin
     ('jsv', (nomad_core.enqueue_job(org, 'jobs_test', 'render', '{}', 'jq6')).id);
 end;
 $$;
+
+-- 7b. 결과 전달 표시(mark_job_delivered): queued·running만 환불 끔 · 반복 안전 · 끝난 작업은 그대로 · 이후 최종 실패는 환불 없음
+do $$
+declare org uuid := pg_temp.ctx('org1'); l5 uuid; j nomad_core.jobs; jd uuid;
+begin
+  select ledger_id into l5 from nomad_core.consume_credits(org, 6, 'job', 'jc8');
+  j := nomad_core.enqueue_job(org, 'jobs_test', 'render', '{}', 'jq9', 100, null, 1, l5);
+  perform 1 from nomad_core.claim_jobs('jq9', 'w1');
+  perform nomad_core.mark_job_delivered(j.id);
+  perform nomad_core.mark_job_delivered(j.id);
+  if (select refund_on_failure from nomad_core.jobs where id = j.id) then raise exception 'mark delivered running'; end if;
+  perform nomad_core.fail_job(j.id, 'w1', 1, 'after delivery', false);
+  if exists (select 1 from nomad_core.credit_ledger where refund_of = l5) then raise exception 'refund after delivery'; end if;
+  -- queued도 표시된다
+  jd := (nomad_core.enqueue_job(org, 'jobs_test', 'render', '{}', 'jq9')).id;
+  perform nomad_core.mark_job_delivered(jd);
+  if (select refund_on_failure from nomad_core.jobs where id = jd) then raise exception 'mark delivered queued'; end if;
+  -- 끝난 작업(succeeded)과 없는 작업은 그대로(오류 없음)
+  jd := (nomad_core.enqueue_job(org, 'jobs_test', 'render', '{}', 'jq10')).id;
+  perform 1 from nomad_core.claim_jobs('jq10', 'w1');
+  perform nomad_core.complete_job(jd, 'w1', 1);
+  perform nomad_core.mark_job_delivered(jd);
+  perform nomad_core.mark_job_delivered(gen_random_uuid());
+  if not (select refund_on_failure from nomad_core.jobs where id = jd) then raise exception 'mark delivered finished'; end if;
+end;
+$$;
+-- API 역할은 직접 호출 불가
+set local role service_role;
+select pg_temp.expect_err('select nomad_core.mark_job_delivered(gen_random_uuid())', '%permission denied%');
+reset role;
 
 -- 서버(service_role JWT) 취소: 감사 actor_role = service, actor_id 없음
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);

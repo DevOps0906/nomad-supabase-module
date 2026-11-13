@@ -140,13 +140,24 @@ begin
   then raise exception 'replaced secret/last4 wrong'; end if;
 end $$;
 
--- 6. 폐기(owner): vault 행 삭제, 복호화 null, 목록에서 제외, 재폐기 거부
+-- 6. 폐기(owner): vault 행 삭제, 복호화 null, 목록에서 제외, 재폐기 no-op
 insert into t_ctx select 'new_secret', secret_id::text from nomad_core.provider_credentials where id = (select v::uuid from t_ctx where k = 'cred2');
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000c1', true),
        set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c1","role":"authenticated"}', true);
 select public.nomad_revoke_provider_credential((select v::uuid from t_ctx where k = 'cred2'));
+-- 재폐기는 no-op(오류 없음), 없는 키는 forbidden
+select public.nomad_revoke_provider_credential((select v::uuid from t_ctx where k = 'cred2'));
+select pg_temp.expect_err($q$select public.nomad_revoke_provider_credential('00000000-0000-4000-8000-00000000c0ff')$q$, '%forbidden%');
+-- 폐기된 키여도 권한 없는 사용자(viewer·비멤버)는 forbidden
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000c2', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c2","role":"authenticated"}', true);
 select pg_temp.expect_err(format('select public.nomad_revoke_provider_credential(%L)', (select v from t_ctx where k = 'cred2')), '%forbidden%');
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000c4', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c4","role":"authenticated"}', true);
+select pg_temp.expect_err(format('select public.nomad_revoke_provider_credential(%L)', (select v from t_ctx where k = 'cred2')), '%forbidden%');
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000c1', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000c1","role":"authenticated"}', true);
 do $$
 begin
   if (select count(*) from public.nomad_list_provider_credentials((select v::uuid from t_ctx where k = 'org'))) <> 0
@@ -176,6 +187,27 @@ begin
   if nomad_core.org_provider_secret(org, 'openai', 'inactive') is not null
   then raise exception 'inactive org must return null'; end if;
   update nomad_core.organizations set active = true where id = org;
+end $$;
+
+-- 6c. 서버(service_role) 폐기: 조직 역할 없이 가능 · vault 행 삭제 · 재폐기 no-op · 없는 키 forbidden
+insert into t_ctx select 'inactive_secret', secret_id::text from nomad_core.provider_credentials where id = '00000000-0000-4000-8000-00000000c0c1';
+set local role service_role;
+select set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select public.nomad_revoke_provider_credential('00000000-0000-4000-8000-00000000c0c1');
+select public.nomad_revoke_provider_credential('00000000-0000-4000-8000-00000000c0c1');
+select pg_temp.expect_err($q$select public.nomad_revoke_provider_credential('00000000-0000-4000-8000-00000000c0ff')$q$, '%forbidden%');
+reset role;
+select set_config('request.jwt.claims', '', true);
+do $$
+begin
+  if (select revoked_at from nomad_core.provider_credentials where id = '00000000-0000-4000-8000-00000000c0c1') is null
+  then raise exception 'server revoke not applied'; end if;
+  if exists (select 1 from vault.secrets where id = (select v::uuid from t_ctx where k = 'inactive_secret'))
+  then raise exception 'vault row must be deleted on server revoke'; end if;
+  if not has_function_privilege('service_role', 'nomad_core.revoke_provider_credential(uuid)', 'execute')
+     or not has_function_privilege('service_role', 'public.nomad_revoke_provider_credential(uuid)', 'execute')
+     or has_function_privilege('anon', 'public.nomad_revoke_provider_credential(uuid)', 'execute')
+  then raise exception 'revoke grants wrong'; end if;
 end $$;
 
 -- 7. oauth_states: 1회 소비 · 만료 · 외부 redirect 거부 · authenticated 접근 불가
