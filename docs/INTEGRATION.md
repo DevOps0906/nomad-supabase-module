@@ -59,6 +59,8 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 카탈로그 RPC는 `feature_code`, `title`, `unlocked`, `upgrade_to`, `addon_sku`, `can_purchase`를 반환합니다. `upgrade_to`는 가능한 최소 상위 플랜입니다. 잠긴 기능에만 구매·업그레이드 안내를 표시하고 `can_purchase`가 거짓이면 업체 담당자에게 요청하도록 안내합니다. `can_purchase`는 구매 실행 권한에 대한 UI 힌트입니다. 구매 서버도 호출자의 업체와 권한을 확인합니다.
 
+수량 한도는 `plan_limits`(`limit_key`별 정수)에 두며, 서버는 `org_plan_limit(조직, 제품, 키)`로 한도를 읽고 현재 개수를 세어 비교합니다(사용자 문맥은 멤버만 조회하는 `plan_limit`). 결과가 null이면 비멤버·비활성 업체·미정의 키이므로 생성을 거부합니다. 무제한은 2147483647이며 앱은 이 값과 같으면 "무제한"으로 표시합니다.
+
 기능 이용권은 제품과 업체에 묶입니다. 운영자 권한 레코드는 업체 멤버십과 별도로 관리합니다. 운영자 레코드만으로 제품 고객 데이터의 RLS가 열리지 않습니다.
 
 service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블에 쓰기 전에 `nomad_core.org_has_feature(업체, 제품, 기능)`로 기능 이용권을 직접 확인해야 합니다(사용자 JWT가 없는 문맥용, service_role만 실행). 로그인 사용자 문맥에서는 `has_feature`를 씁니다. 구독이 없는 업체는 C 플랜으로 취급합니다.

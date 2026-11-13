@@ -544,6 +544,12 @@ erDiagram
     jsonb tools
     timestamptz created_at
   }
+  plan_limits {
+    text product_code PK
+    text plan_code PK
+    text limit_key PK
+    integer limit_value
+  }
   organizations ||--o{ memberships : "organization_id"
   products ||--o{ plans : "product_code"
   products ||--o{ features : "product_code"
@@ -655,3 +661,4 @@ erDiagram
   orders ||--o{ deliveries : "order_id"
   readings ||--o{ saved_reports : "user_id"
   trips ||--o{ trip_days : "trip_id"
+  plans ||--o{ plan_limits : "product_code"

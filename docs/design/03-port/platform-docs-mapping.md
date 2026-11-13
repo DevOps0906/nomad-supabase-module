@@ -123,6 +123,8 @@
 | D10 | local-news 코어 요청 R-1~R-10(독자 인증·테마) 수용 여부 | P4 |
 | D11 | registry: school `isolated`→`org`, `db: supabase-b`→`supabase-a` 변경 승인 | P1 |
 
+- 결정(2026-11-13 사용자): D1 계약만 유지(결제 테이블 이식 안 함) · D2 버킷 분리 채택(plan/pack, 월 지급 만료, 충전팩=addon) · D3 B 정규화 · D6 AI 계층 코어 이식(C5). 나머지 D4·D5·D7~D11 대기.
+
 ## 6. 미확인 (근거 필요)
 
 - 앱 코드 쪽 코어 의존(특히 voice·AI)은 SQL 참조만 셌다 — 제품 `02_ARCHITECTURE.md` 확인 필요.
