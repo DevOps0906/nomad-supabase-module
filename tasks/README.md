@@ -27,6 +27,7 @@
 | 2026-11-13 | nomad_core 역할 | reviewer 역할 없음 → contentflow 제품 표 reviewers로 보강 | 제품 표 유지(core 역할은 공통만) |
 | 2026-11-13 | lottolab org안 | 계정 삭제 시 1인 조직 정리 필요 | 데이터 이전·계정 삭제 작업에서 |
 | 2026-11-13 | 제품 레포 앱 코드 | public → nomad_<slug> 스키마 지정(Accept-Profile·.schema()), 일부 이름 변경, ContentFlow 키워드 upsert → 조회 후 insert/update | 각 레포 적용 작업(existing.md 대응표 기준) |
+| 2026-11-13 | erp request_join | 가입 코드 무차별 시도 제한 없음(core rate_limit_hit은 서버 전용, 오류는 raise라 카운트 롤백) | erp_private rate 함수 + 잘못된 코드 반환형 변경, 앱 응답 확인 후 |
 
 ## 교훈 (다음 작업에 그대로 적용할 것만, 20줄 이내 유지)
 - 

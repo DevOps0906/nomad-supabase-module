@@ -123,7 +123,7 @@
 | D10 | local-news 코어 요청 R-1~R-10(독자 인증·테마) 수용 여부 | P4 |
 | D11 | registry: school `isolated`→`org`, `db: supabase-b`→`supabase-a` 변경 승인 | P1 |
 
-- 결정(2026-11-13 사용자): D1 계약만 유지(결제 테이블 이식 안 함) · D2 버킷 분리 채택(plan/pack, 월 지급 만료, 충전팩=addon) · D3 B 정규화 · D6 AI 계층 코어 이식(C5). 나머지 D4·D5·D7~D11 대기.
+- 결정(2026-11-13 사용자): D1 계약만 유지(결제 테이블 이식 안 함) · D2 버킷 분리 채택(plan/pack, 월 지급 만료, 충전팩=addon) · D3 B 정규화 · D6 AI 계층 코어 이식(C5). D4 전부 별도 제품(흡수 안 함) · D5 개인형 제안 제품도 user안·org안 둘 다 · D8 anon은 공개용 RPC만(테이블 직접 접근 금지, 속도 제한) · D9 flora·sceneflow·commerce는 platform-docs 기준으로 products/<slug>/ 새로 작성(청사진은 참고) · D11 school 조직형. 남은 것 D7·D10.
 
 ## 6. 미확인 (근거 필요)
 
