@@ -251,3 +251,18 @@ select zz_check.denied($$select nomad_core.rate_limit_take('erp:join:x', 10, 360
 reset role;
 select zz_check.expect($$select count from nomad_core.rate_limit_buckets where key = 'erp:join:00000000-0000-0000-0000-0000000000a7'$$, 11);
 select zz_check.expect($$select count(*) from nomad_erp.join_requests where user_id = '00000000-0000-0000-0000-0000000000a7'$$, 0);
+-- 존재 노출 금지: 없는 코드 · 교체된(만료) 코드 · 정지된 다른 조직 코드 응답이 글자까지 같다. 셋 다 시도 횟수에 든다.
+insert into t_ids select 'code_b_old', join_code from nomad_erp.join_codes where organization_id = '00000000-0000-0000-0000-00000000000b';
+insert into t_ids values ('code_b_new', nomad_erp.rotate_join_code('00000000-0000-0000-0000-00000000000b'));
+update nomad_erp.workspaces set status = 'suspended' where organization_id = '00000000-0000-0000-0000-00000000000b';
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000a8', 'a8@example.test');
+create temp table t_join_resp (k text primary key, r jsonb);
+grant all on t_join_resp to public;
+select zz_check.login('00000000-0000-0000-0000-0000000000a8');
+insert into t_join_resp select 'none', nomad_erp.request_join('ZZZZZZZZ', '추측');
+insert into t_join_resp select 'rotated', nomad_erp.request_join((select v from t_ids where k = 'code_b_old'), '추측');
+insert into t_join_resp select 'suspended', nomad_erp.request_join((select v from t_ids where k = 'code_b_new'), '추측');
+reset role;
+select zz_check.expect($$select count(distinct r::text) from t_join_resp$$, 1);
+select zz_check.expect($$select count(*) from t_join_resp where r = '{"ok": false, "code": "P0002"}'::jsonb$$, 3);
+select zz_check.expect($$select count from nomad_core.rate_limit_buckets where key = 'erp:join:00000000-0000-0000-0000-0000000000a8'$$, 3);

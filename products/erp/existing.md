@@ -56,7 +56,7 @@
 | export_xlsx(불리언) | — (nomad_core.features `erp/export_xlsx`, 플랜 A만) | false / true |
 
 ## 앱 변경 (이식 후 웹이 바꿀 것)
-- `request_join` 반환이 `join_requests` 행 → jsonb: `{ok:true, request:{…}}` · `{ok:false, code:'P0002'}`(잘못된 가입 코드, 이전엔 raise) · `{ok:false, code:'ER006', reset_at}`(시도 초과). raise하면 시도 카운트가 롤백되므로 결과로 돌려준다. ER005(이미 멤버·초대)는 그대로 raise.
+- `request_join` 반환이 `join_requests` 행 → jsonb: `{ok:true, request:{…}}` · `{ok:false, code:'P0002'}`(잘못된 가입 코드, 이전엔 raise) · `{ok:false, code:'ER006', reset_at}`(시도 초과). raise하면 시도 카운트가 롤백되므로 결과로 돌려준다. ER005(이미 멤버·초대)는 그대로 raise. 없는 코드·교체된(rotate) 이전 코드·정지(suspended) 조직 코드는 모두 같은 `{ok:false, code:'P0002'}`(존재 노출 금지) — 웹은 이 셋을 구분하는 문구를 두지 않는다. 시도 초과는 맞는 코드여도 ER006(창 안).
 - request_join 한도는 사용자(계정) 단위라 계정을 여러 개 만들면 우회된다(코드 공간 32^8이라 위험 낮음). 앞단 Route Handler에서 IP 단위 제한을 함께 건다(예: IP당 30회/시간, 서버 `nomad_core.rate_limit_hit('erp:join_ip:<IP 해시>', …)`).
 - 구독이 끊긴 조직은 has_access=false → 모든 표 0건·RPC 거부. 웹은 `nomad_core.has_feature(org, 'erp', 'workspace')`(또는 `public.nomad_dashboard_features`)로 잠김 화면을 띄운다.
 - 엑셀 내보내기 버튼은 `has_feature(org, 'erp', 'export_xlsx')`로 판정(앱 플래그 대신).
