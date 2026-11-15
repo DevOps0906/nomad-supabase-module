@@ -1,7 +1,9 @@
-# task-008 격리형 hospital 확정 마이그레이션 — 보류
+# task-008 격리형 hospital 확정 마이그레이션 — 완료(2026-11-15, products/hospital/isolated/)
 
 > 2026-11-13 사용자 결정: 병원만 격리. school은 platform-docs(sms, 1700)처럼 조직형으로 task-009 이식 대상.
 > 보류 사유(challenger REVISE): 사람 결정 필요 — ① 앱 접근 경로(브라우저 직접 vs 서버 service_role: RLS·감사·암호화가 전부 달라짐) ② 이름·전화 검색용 해시 허용 여부 ③ 첫 admin 부트스트랩 ④ 의료기록 보존 기간.
+> 2026-11-15 사용자 결정(보류 해제): ① 서버 전용 접근(브라우저 직접 접근 없음, 앱 서버 service_role + DB 함수에서 직원 권한·감사) ② 이름·전화 정확 일치 검색용 키 넣은 해시 허용(HMAC, 키는 Vault, 부분 검색 없음) ③ 첫 관리자는 설치 스크립트가 service_role로 bootstrap 함수 1회 호출(이미 있으면 거부, 앱 경로 없음) ④ 기록 종류별 법정 보존 기간 표, 기간 전 삭제 금지·기간 후 파기 대상 표시(자동 삭제 없음).
+> 2026-11-15 challenger REVISE 후 결정: (사용자) 행위자 = 앱 서버 보증 + DB 최소 검사(함수마다 p_actor 활성 직원·역할 확인, service_role 표 직접 권한 0·EXECUTE만) · 범위 = CRM 한정(예약·연락·상담 메모, 검사·수납·처방 표 이식 안 함, EMR 아님) · 파기 = 기간 지나면 파기 대상 목록 + 관리자 파기 함수(감사 로그). (팀장) 모든 FK restrict·퇴사는 비활성화·감사 행위자는 스냅샷 · HMAC은 DB 함수가 Vault 키로 계산, 키 없으면 오류(fail-closed), 정규화(전화 숫자만·+82→0, 이름 NFC·공백 제거)·key_version · 감사 로그 TRUNCATE 차단·열람 함수 VOLATILE · bootstrap은 advisory 잠금+단일 행 · 검사에 nomad_core 참조 0·anon/authenticated 함수 권한 0 · 위치 products/hospital/isolated/(대시보드·task-008 위치 갱신은 후속) · 보존 기간 조문은 법무 확인 전 초안.
 > 해결해야 할 🔴: staff·auth 삭제 cascade가 진료기록을 지움(restrict로) · appointments 기반 담당 판정의 자가 배정·간호사 누락 · records select 차단과 insert…returning/update 충돌(읽기·쓰기·목록 경로 설계).
 > 🟡: rules/blueprints.md(격리형은 설계 문서만)와 위치 충돌 · `current_role` 예약어 · definer 함수 EXECUTE revoke · 감사 로그 actor 보존 · 테스트는 isolated/<slug>에서 실제 db reset.
 > 참고: platform-docs/products/admin-suite(hms 별도 DB 설계)도 근거에 추가.
