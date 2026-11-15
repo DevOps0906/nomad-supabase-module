@@ -1,0 +1,89 @@
+{
+  "slug": "toon",
+  "icon": "🎨",
+  "tagline": "인스타툰·웹툰 제작과 내보내기",
+  "overview": "조직의 owner·admin·editor가 작품(series)·회차·컷을 만들고 viewer는 읽기만 한다. 플랫폼이 소유한 에셋 카탈로그(팩·캐릭터·에셋), AI 이미지 생성 기록, 내보내기, 브랜디드 툰 협찬을 담는다. 플랜 A/B/C 중 C는 studio·export_png(무료 기능)만 있어 구독이 끊겨도 작성은 남고, ZIP·스트립·MP4·워터마크 제거·프리미엄 에셋·협찬은 A·B에서만 열린다. 작품·회차·컷 수 등 수치는 plan_limits 키(시드 없음, 없으면 원본 free 값)로 판정한다. 생성·내보내기·내 에셋 쓰기는 서버(service_role)만 하며, 내보내기의 플랜·워터마크·협찬 문구는 트리거가 정한다.",
+  "diagrams": [
+    {
+      "title": "역할별 함수와 표",
+      "mermaid": "flowchart LR\n  ED[editor 이상] -->|RLS 쓰기| SE[series]\n  ED --> EP[episodes]\n  ED --> CU[cuts]\n  ED --> SC[series_characters]\n  ED --> SP[sponsorships]\n  ED --> SCD[\"save_cut_doc · reorder_cuts\"]\n  SCD --> CU\n  MG[owner·admin] --> DS[decide_sponsorship]\n  DS --> SP\n  ED --> AUA[archive_user_asset]\n  AUA --> UA[user_assets]\n  SV[서버 service_role] --> GE[generations]\n  SV --> UA\n  SV --> EX[exports]\n  EX -->|\"apply_export_sponsorship 트리거\"| SP\n  ME[멤버] --> OAA[\"org_asset_access · plan_features\"]\n  OAA --> AS[assets]\n  ME -->|catalog_assets 뷰| AS"
+    },
+    {
+      "title": "협찬 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> draft\n  draft --> in_review\n  in_review --> draft\n  in_review --> approved: decide_sponsorship\n  in_review --> changes_requested: decide_sponsorship\n  changes_requested --> draft\n  changes_requested --> in_review\n  approved --> in_review: 브리프 등 내용 수정\n  approved --> closed\n  closed --> [*]"
+    }
+  ],
+  "files": {
+    "products/toon/org/0001_toon.sql": {
+      "summary": "nomad_toon·nomad_toon_private 스키마, 플랜 A/B/C와 기능 9개 시드, 카탈로그·작품·서버 기록 표 11개와 카탈로그 뷰, 플랜 한도·상태 전이·내보내기 보정 트리거, RPC, RLS, Storage 버킷 3개를 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["asset_packs", "에셋 팩 카탈로그(플랫폼 소유, 등급 free/premium, 공개 전 라이선스 검증 필수)"],
+            ["characters", "팩 소속 카탈로그 캐릭터"],
+            ["assets", "카탈로그 에셋(포즈·표정·배경·소품·말풍선·효과 글자·BGM), 원본·편집 경로는 사용자에게 숨김"],
+            ["catalog_assets(뷰)", "공개 에셋만 원본·편집 경로를 빼고 보여 주는 security_invoker 뷰"],
+            ["series", "작품(인스타툰/웹툰, 캔버스 크기), 수는 plan_limits max_series"],
+            ["series_characters", "작품 캐스트(카탈로그 캐릭터 + 작품 내 이름)"],
+            ["episodes", "회차(콘티 script, draft→storyboarded→editing→done), 협찬 연결 가능"],
+            ["cuts", "컷(레이어 문서 doc, revision은 트리거 관리)"],
+            ["sponsorships", "브랜디드 툰 협찬(광고주 브리프·금지어·대가성 문구·승인 상태)"],
+            ["generations", "AI 이미지 생성 기록(잡·크레딧 원장 연결, 멱등 request_id)"],
+            ["user_assets", "채택한 생성물·업로드(AI 생성 표시 무결성, 소프트 삭제)"],
+            ["exports", "내보내기 기록(png·zip·webtoon_strip·mp4, 플랜 코드·워터마크·협찬 문구를 트리거가 기록)"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["save_cut_doc(p_cut_id, p_doc, p_expected_revision)", "컷 문서 저장(낙관적 동시성, 어긋나면 TN409)"],
+            ["reorder_cuts(p_episode_id, p_cut_ids)", "회차의 컷 id 전부를 새 순서로 재배치"],
+            ["org_asset_access(p_org_id, p_asset_ids)", "에셋별 사용 가능 여부(premium_assets 이용권 기준)"],
+            ["monthly_export_count(p_org_id)", "이번 달(KST) 이미지 내보내기 수(exports_per_month 판정용)"],
+            ["archive_user_asset(p_user_asset_id)", "내 에셋 보관(소프트 삭제, editor 이상, 감사 기록)"],
+            ["decide_sponsorship(p_sponsorship_id, p_decision, p_note)", "검토 중 협찬을 승인·수정 요청(owner/admin, 감사 기록)"],
+            ["plan_features(p_org)", "조직의 toon 기능·한도 값(JSON), 멤버 또는 서버만"],
+            ["has_access · can_edit · is_manager · has_toon_access · feature_int", "RLS 정책용 이용권·역할 판정 도우미"],
+            ["내부 트리거 함수", "enforce_plan_limits·guard_episode_sponsorship·bump_cut_revision·enforce_run_status_transition·enforce_sponsorship_status·apply_export_sponsorship·exports_immutable"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "작품·회차·컷·캐스트·협찬은 같은 조직 멤버 + studio 이용권만 읽기, 쓰기 editor 이상, 삭제 owner/admin"],
+            ["플랜 한도", "작품·회차·컷 수 초과 시 TN001(키 없으면 원본 free 값 1·3·10)"],
+            ["기능 잠금", "협찬 생성은 sponsorship 기능(TN002), 내보내기 종류별 이용권(TN004), no_watermark 없으면 워터마크 강제"],
+            ["협찬 게이트", "회차 협찬 연결은 owner/admin만, 승인 전 협찬 회차 최종 내보내기 금지(TN008)"],
+            ["서버 기록", "generations·user_assets·exports는 멤버 읽기만, 쓰기 grant 없음(service_role)"],
+            ["Storage", "toon-catalog 비공개(서버만), toon-previews 공개(카탈로그 썸네일만), toon-user-assets 비공개(자기 조직 폴더 읽기만)"]
+          ]
+        }
+      ]
+    },
+    "products/toon/org/0002_ai.sql": {
+      "summary": "AI·음성 기능 4개를 등록하고 플랜에 연결하며, toon의 플랫폼 기본 AI 라우팅(nomad_core.ai_routing_settings)을 넣는다. 제공자 행이 있으면 체인의 제공자 존재·종류·오픈소스 모드를 검사한다.",
+      "parts": [
+        {
+          "title": "기능·플랜",
+          "items": [
+            ["ai_chat · voice_chat · dialogue_voice", "창작 어시스턴트 채팅·음성 질문·대사 음성 미리듣기, A·B·C 모두"],
+            ["video_voice", "MP4 음성 입히기, A·B만"],
+            ["ai_chat_turns_per_day", "plan_limits 키(시드 없음, 원본 free 20 / pro 200)"]
+          ]
+        },
+        {
+          "title": "라우팅 기본값",
+          "items": [
+            ["llm", "toon.storyboard·consistency·dialogue·prompt_en, chat, wiki.*, dify.aux(오픈소스 강제)"],
+            ["embedding", "toon.knowledge(오픈소스 모드)"],
+            ["stt·tts", "voice_chat·dialogue_voice·video_voice(elevenlabs·oss-voice 체인)"]
+          ]
+        }
+      ]
+    },
+    "products/toon/check_org.sql": {
+      "summary": "조직 교차 접근 거부, 역할별 권한, 카탈로그 컬럼 숨김, 플랜 한도, 구독 끊김 시 기능 잠금, 내보내기 보정, 협찬, AI 시드를 합성 데이터로 검사하고 rollback한다."
+    }
+  }
+}

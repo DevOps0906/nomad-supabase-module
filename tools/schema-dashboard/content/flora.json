@@ -1,0 +1,77 @@
+{
+  "slug": "flora",
+  "icon": "🌸",
+  "tagline": "AI와 함께 책을 쓰고 내보내는 출판 작업 공간",
+  "overview": "책 1권을 프로젝트 1개로 두고 10단계 위저드로 목차·원고(소제목 단위)를 쓰며, AI 생성·다듬기·표지·원고 업로드·PDF/ePub 내보내기·발신 웹훅·AI 에이전트 검수를 다루는 조직형 DB다. 조직 멤버가 쓰며 편집은 owner·admin·editor, 책·페르소나 삭제와 웹훅 보기·공개 페이지 설정은 owner·admin이다. 작업 공간(flora)은 A·B·C 모두 열려 있고 워터마크 없음·프로 테마·전체 생성·업로드·quality 모드·공개 페이지 등 10개 기능은 A·B만이며, 구독이 끊기면 기존 유료 행 경로까지 DB 트리거가 PB014로 막는다. 책·챕터·소제목·단락 수량은 plan_limits(없으면 원본 free 값)로 제한하고, anon은 공개 책 RPC 하나만 부를 수 있다.",
+  "diagrams": [
+    {
+      "title": "집필·생성 흐름",
+      "mermaid": "flowchart LR\n  U[편집자] --> B[(books)]\n  U --> CH[(chapters)]\n  U --> SE[(sections)]\n  U --> MS[(member_settings)]\n  U --> RGC[request_generation_cancel]\n  U --> SBV[set_book_visibility]\n  U --> DAT[decide_agent_task]\n  RGC --> GR[(generation_runs)]\n  SBV --> B\n  DAT --> AT[(agent_tasks)]\n  W[서버·워커 service_role] --> GR\n  W --> SE\n  W --> CI[(cover_images)]\n  W --> MU[(manuscript_uploads)]\n  W --> BE[(book_exports)]\n  W --> WD[(webhook_deliveries)]\n  W --> AT\n  TR[trailer 서버] --> BFT[book_for_trailer]\n  BFT --> B\n  V[독자 anon] --> GPB[get_public_book]\n  GPB --> B"
+    },
+    {
+      "title": "책 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> draft\n  draft --> writing\n  draft --> archived\n  writing --> draft\n  writing --> ready\n  writing --> archived\n  ready --> writing\n  ready --> completed\n  ready --> archived\n  completed --> writing\n  completed --> archived\n  archived --> draft"
+    }
+  ],
+  "files": {
+    "products/flora/org/0001_flora.sql": {
+      "summary": "nomad_flora 스키마와 13개 표·트리거·RLS·사용자/서버/공개 RPC, 비공개 Storage 버킷(flora-files·flora-exports)을 만든다. 제품 flora와 A·B·C 플랜, 기능 11개, 웹훅 제공자 코드(outbound_webhook)를 등록한다.",
+      "parts": [
+        { "title": "플랜·기능", "items": [
+          ["A·B", "flora + no_watermark·themes_pro·write_all·upload·tone_slider·writing_assist·quality_mode·persona_blend·webhooks·public_page"],
+          ["C", "flora(작업 공간)만, 원본 free 기능"],
+          ["plan_limits 키", "max_books(3)·max_chapters(3)·max_sections(6)·max_paragraphs(3)·exports_per_month(2)·personas(40), 없으면 괄호 값"]
+        ] },
+        { "title": "표", "items": [
+          ["custom_personas", "나만의 페르소나(합성 결과), 생성은 서버(persona_blend), 사용자는 이름·보관·삭제"],
+          ["books", "책 1권 = 프로젝트 1개(위저드 1~10단계·책 정보), 서버 컬럼 제외 컬럼 grant, 소프트 삭제"],
+          ["chapters", "책의 챕터(목차), 편집자 CRUD, 책당 개수 한도"],
+          ["sections", "소제목 단위 원고, 사용자 편집 = edited, 서버 생성 결과 = generated"],
+          ["cover_images", "AI 표지 후보, 서버 쓰기만"],
+          ["manuscript_uploads", "원고 업로드(기능 upload), 파싱은 워커, 서버 쓰기만"],
+          ["book_exports", "PDF/ePub 내보내기 기록(워터마크 없음 = no_watermark), 같은 내용은 재과금 없이 재사용"],
+          ["generation_runs", "전체 순차 생성·전체 다듬기 실행(write_all, quality = quality_mode), 책당 진행 중 1개"],
+          ["member_settings", "사용자별 화면 설정(테마·페르소나 즐겨찾기·생성 모드), 본인 행만"],
+          ["webhook_endpoints", "발신 웹훅 엔드포인트(기능 webhooks), 서명 비밀은 같은 조직 provider_credentials, owner·admin 읽기"],
+          ["webhook_deliveries", "웹훅 발송 기록, 서버 쓰기만"],
+          ["waitlist", "출시 전 대기자 명단(조직 없음), service_role 전용"],
+          ["agent_tasks", "AI 에이전트 작업 단위(organization_id + request_id 멱등), 사용자는 검수 결정만"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["request_generation_cancel(p_run_id)", "전체 생성 취소 요청, 워커가 남은 자식 작업을 취소(환불 포함)"],
+          ["set_book_visibility(p_book_id, p_is_public, p_slug)", "공개 책 페이지 켜기/끄기(owner/admin, 완성 상태, 켜기는 public_page 필요)"],
+          ["decide_agent_task(p_task_id, p_decision, p_note)", "에이전트 작업 검수 결정 기록(검수 대기가 아니면 PB012)"],
+          ["book_for_trailer(p_organization_id, p_book_id, p_actor)", "service_role 전용, trailer 제품에 책 정보(제목·부제·저자·장르)만 돌려줌"],
+          ["get_public_book(p_slug)", "anon 공개 읽기, 구독이 끊겨도 이미 공개된 책은 열람 유지"],
+          ["has_access · can_edit · can_manage", "RLS 판정: 이용권 멤버 / 편집자 / owner·admin"],
+          ["내부 도우미·트리거", "limit_of·org_feature·theme_allowed, 서버 표 잠금·수량 한도(PB001~PB004)·기능 잠금(PB014)·결과 전달(PB015 + mark_job_delivered)·원장 조직 검사·상태 전이 트리거"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 이용권 멤버만 읽기, 남의 조직 행은 P0002로 존재도 숨김"],
+          ["서버 컬럼·표 잠금", "컬럼 grant 없음 + 트리거(42501) 이중 잠금"],
+          ["생성 중 편집 금지", "생성 중인 소제목은 사용자 편집 거부(PB005)"],
+          ["결과 저장", "작업이 이미 실패·취소(환불 끝)면 결과 저장 거부(PB015)"],
+          ["anon", "표 권한 0, get_public_book 하나만"],
+          ["Storage", "flora-files(원고·표지)·flora-exports(PDF/ePub) 비공개, 이용권 멤버 읽기·서버 쓰기"]
+        ] }
+      ]
+    },
+    "products/flora/org/0002_ai.sql": {
+      "summary": "AI 기능 ai_chat·book_wiki·voice_dictation을 A·B·C에, narration을 A·B에 열고 flora AI 라우팅 기본값 12행을 넣는다. 수치 한도는 plan_limits 키로만 둔다.",
+      "parts": [
+        { "title": "기능", "items": [
+          ["ai_chat · book_wiki · voice_dictation", "글쓰기 도우미 채팅·책 설정집 위키·받아쓰기, A·B·C"],
+          ["narration", "원고 낭독·오디오북 미리듣기, A·B"]
+        ] },
+        { "title": "라우팅 기본값", "items": [
+          ["flora.draft·flora.assist·chat·wiki.*", "LLM"],
+          ["dify.aux·flora.knowledge", "오픈소스"],
+          ["flora.dictation·voice_chat·narration", "STT/TTS"]
+        ] }
+      ]
+    },
+    "products/flora/check_org.sql": {
+      "summary": "조직 2곳 교차 거부·역할별 권한·서버 컬럼/표 잠금·수량 한도·결과 저장 거부·참조 조직 일치·공개 RPC·trailer 계약·구독 끊김 잠금·조직 비활성·함수 권한을 합성 데이터로 확인하고 rollback."
+    }
+  }
+}

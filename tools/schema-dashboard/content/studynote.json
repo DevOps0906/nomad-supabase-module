@@ -1,0 +1,94 @@
+{
+  "slug": "studynote",
+  "icon": "📒",
+  "tagline": "원문을 2모델로 정리하는 학습 일지",
+  "overview": "사용자가 하루치 학습 원문을 쓰면 서버가 두 모델로 병렬 정리(base1·base2)한 뒤 통합(merge)해 최종 일지를 만드는 DB다. 조직형(org)은 조직 멤버(owner·admin·editor 쓰기, 그 밖은 읽기)가, 개인형(user)은 본인만 자기 일지를 다루며 과금·작업은 사용자가 owner인 1인 조직으로 기록한다. 기능 notes는 A·B·C 모두 열려 있고 premium 등급 모델(premium_models)은 A·B만, 입력 길이·보존 한도는 plan_limits 키(없으면 원본 free 값)로 정한다. 사용자는 원문·날짜만 쓰고 상태·결과 컬럼은 컬럼 grant와 트리거로 서버만 쓰며, 실행은 크레딧 선차감과 작업 등록을 한 트랜잭션으로 묶고 미성공 단계는 환불한다.",
+  "diagrams": [
+    {
+      "title": "정리 실행 흐름",
+      "mermaid": "flowchart LR\n  U[사용자] --> E[(entries)]\n  U --> US[(user_settings)]\n  U --> RC[request_run_cancel]\n  SV[서버 service_role] --> SR[start_run]\n  W[워커] --> RS[record_step]\n  W --> FR[finish_run]\n  SCH[스케줄러] --> RR[reconcile_runs]\n  SCH --> ER[enforce_retention]\n  SCH --> PD[purge_deleted]\n  SR --> CC[\"nomad_core.consume_credits·enqueue_job\"]\n  SR --> R[(runs)]\n  SR --> ST[(run_steps)]\n  SR --> CG[(cost_guard)]\n  RS --> ST\n  FR --> R\n  FR --> E\n  RC --> R\n  RR --> R\n  ER --> E\n  PD --> E"
+    },
+    {
+      "title": "실행 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> queued\n  queued --> running\n  queued --> canceled\n  queued --> failed\n  running --> succeeded\n  running --> partial\n  running --> failed\n  running --> canceled\n  succeeded --> [*]\n  partial --> [*]\n  failed --> [*]\n  canceled --> [*]"
+    }
+  ],
+  "files": {
+    "products/studynote/org/0001_studynote.sql": {
+      "summary": "조직형 nomad_studynote(공개)·nomad_studynote_private(서버 전용) 스키마와 7개 표·RLS·서버 RPC를 만든다. 제품 studynote와 A·B·C 플랜, 기능 notes·premium_models를 등록하고 모델 카탈로그·운영 상수를 시드한다.",
+      "parts": [
+        { "title": "플랜·기능", "items": [
+          ["notes", "A·B·C 모두(구독이 끊겨도 정리는 유지)"],
+          ["premium_models", "A·B만, premium 등급 모델 사용"],
+          ["plan_limits 키", "max_input_chars(5000)·history_max_entries(50)·history_max_bytes(5000000), 없으면 괄호 값"]
+        ] },
+        { "title": "표", "items": [
+          ["model_catalog", "허용 LLM 목록(lite·standard·premium 등급, 호출당 크레딧), 활성 행만 읽기"],
+          ["runtime_config", "운영 상수(일일 전체·조직별 크레딧 상한, 조직당 동시 실행 수), 서버 전용"],
+          ["cost_guard", "KST 날짜별 전체 크레딧 소비, 서버 전용"],
+          ["user_settings", "조직·사용자별 모델 3종(base1·base2·merge)과 테마, 본인 행만"],
+          ["entries", "하루치 일지(원문 + 최종본), 소프트 삭제(휴지통 30일)"],
+          ["runs", "정리 실행 1회, 크레딧 원장·작업과 1:1, 일지당 활성 실행 1개"],
+          ["run_steps", "실행 단계별 결과 카드(base1·base2·merge)"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["start_run(p_organization_id, p_user_id, p_entry_id, p_request_id, 모델 3종, p_parent_run_id, p_retry_roles)", "서버가 크레딧 선차감·실행/단계 생성·작업 등록을 한 트랜잭션으로. request_id 멱등, 한도 초과 NT004·예산 NT005·동시 실행 NT006"],
+          ["record_step(…)", "워커가 카드 진행·결과 기록, 종료된 실행에는 NT003"],
+          ["finish_run(p_run_id, p_final_text, p_keywords)", "종료 확정 + 미성공 단계 환불 + entries 갱신, 성공이면 키워드 정확히 2개"],
+          ["request_run_cancel(p_run_id)", "실행 생성자 또는 owner·admin이 취소. queued는 즉시 전액 환불, running은 요청만 남김"],
+          ["reconcile_runs(p_organization_id)", "작업은 끝났는데 실행이 남은 경우(워커 사망) 기록 정리"],
+          ["enforce_retention(p_organization_id) · purge_deleted(p_grace)", "보존 한도 초과 일지 soft delete, 유예 지난 일지 영구 삭제"],
+          ["has_access(org) · can_edit(org)", "RLS 판정: 기능 notes, 쓰기는 owner·admin·editor"],
+          ["내부 도우미·트리거", "org_limit·release_budget·assert_job_open(private), 서버 표 쓰기 차단·결과 컬럼 잠금·상태 전이 트리거"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 읽기는 has_access(organization_id)"],
+          ["결과 컬럼 잠금", "entries 상태·결과는 컬럼 grant + 트리거로 서버만, 정리 중에는 원문도 잠김(NT001)"],
+          ["삭제", "entries 삭제는 owner·admin만"],
+          ["상태 전이", "entries draft→organizing→organized/draft, 종료된 실행은 불변(NT003)"],
+          ["이중 환불 방지", "failed 환불은 nomad_core.fail_job과 같은 키, 그 밖은 refund:run 키 + mark_job_delivered"]
+        ] }
+      ]
+    },
+    "products/studynote/org/0002_ai.sql": {
+      "summary": "AI 기능(ai_chat·lecture_note·voice_chat·quiz_voice)을 A·B·C 모두에 열고 studynote AI 라우팅 기본값 13행을 넣는다. 수치 한도는 plan_limits 키로만 둔다.",
+      "parts": [
+        { "title": "기능", "items": [
+          ["ai_chat", "내 노트 근거 Q&A"],
+          ["lecture_note", "강의 녹음 → 노트(STT, 오픈소스 강제)"],
+          ["voice_chat · quiz_voice", "음성 대화·퀴즈 음성"]
+        ] },
+        { "title": "라우팅 기본값", "items": [
+          ["studynote.organize·quiz·chat·wiki.*", "LLM, oss-llm 우선"],
+          ["dify.aux · studynote.knowledge · lecture_note", "오픈소스 전용"],
+          ["voice_chat · quiz_voice", "STT/TTS, oss-voice·elevenlabs"]
+        ] }
+      ]
+    },
+    "products/studynote/user/0001_studynote.sql": {
+      "summary": "개인형 nomad_studynote 스키마를 만든다. 표 구성은 조직형과 같고 RLS는 user_id = auth.uid() + nomad_core.user_has_feature('studynote', 'notes')다. 실행에는 과금 조직(본인 1인 조직)을 organization_id로 함께 기록한다.",
+      "parts": [
+        { "title": "표", "items": [["조직형과 같은 7개 표", "model_catalog~run_steps, 본인 행만"]] },
+        { "title": "함수(RPC)", "items": [
+          ["start_run · record_step · finish_run · reconcile_runs · purge_deleted", "서버 전용, 조직형과 같은 역할"],
+          ["enforce_retention(p_user_id, p_organization_id)", "사용자 단위 보존 한도 적용(서버)"],
+          ["request_run_cancel(p_run_id)", "본인 실행만 취소"],
+          ["has_access()", "호출자 본인의 notes 이용권"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["본인 격리", "모든 표 RLS, user_id = auth.uid()"],
+          ["결과 컬럼 잠금", "조직형과 같음(컬럼 grant + 트리거)"]
+        ] }
+      ]
+    },
+    "products/studynote/user/0002_ai.sql": {
+      "summary": "조직형 0002_ai.sql과 같은 내용이다. AI 기능 4개를 A·B·C에 열고 라우팅 기본값을 넣는다."
+    },
+    "products/studynote/check_org.sql": {
+      "summary": "조직형 검사: 조직 2곳 교차 거부·역할별 쓰기·결과 컬럼 잠금·실행(선차감·멱등·환불·재시도)·구독 끊김 잠금·취소 권한·보존·함수 권한을 확인하고 rollback."
+    },
+    "products/studynote/check_user.sql": {
+      "summary": "개인형 검사: 사용자 2명 교차 거부·결과 컬럼 잠금·실행(1인 과금 조직)·구독 끊김 잠금·취소 권한·보존·함수 권한을 확인하고 rollback."
+    }
+  }
+}

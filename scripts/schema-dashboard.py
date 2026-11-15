@@ -2,7 +2,8 @@
 """스키마 대시보드 데이터 생성기 (표준 라이브러리만).
 
 core(supabase/migrations/*nomad_core*.sql) · products/<slug>/{user,org,app,isolated}/*.sql · 각 레포 기존 migrations ·
-bundles/ 를 읽어 tools/schema-dashboard/data/schema.json 과 data/bundles/*.sql 을 만든다. 읽기만 한다(원본 수정 없음).
+bundles/ · tools/schema-dashboard/content/(분류·설명 JSON, 없으면 건너뜀)를 읽어
+tools/schema-dashboard/data/schema.json 과 data/bundles/*.sql 을 만든다. 읽기만 한다(원본 수정 없음).
 실행: python scripts/schema-dashboard.py [--out <schema.json>]
 레포 위치: 기본 D:\\WorkSpace\\DEV (환경 변수 NOMAD_DEV_ROOT로 변경). 비밀 패턴이 출력에 있으면 실패한다.
 """
@@ -16,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEV = Path(os.environ.get("NOMAD_DEV_ROOT", r"D:\WorkSpace\DEV"))
 OUT = ROOT / "tools" / "schema-dashboard" / "data" / "schema.json"
+CONTENT = ROOT / "tools" / "schema-dashboard" / "content"
 if "--out" in sys.argv:
     OUT = Path(sys.argv[sys.argv.index("--out") + 1])
 
@@ -537,6 +539,32 @@ def discover_products():
     return out
 
 
+def load_content(name):
+    """content/<name>.json (사람이 쓰는 설명). 없거나 JSON 오류면 경고 후 None — 작성 중이어도 생성은 계속한다."""
+    p = CONTENT / f"{name}.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(read(p))
+    except ValueError as e:
+        print(f"  경고: {rel(p)} JSON 오류로 건너뜀 — {e}", file=sys.stderr)
+        return None
+
+
+def mono_source(slug, path):
+    """모노레포 파일(2026120100NNMM_<slug>_<file>.sql)의 원본 products/<slug>/<dir>/<file>.sql. 이름이 겹치면 내용이 같은 쪽."""
+    m = re.match(rf"^\d{{14}}_{re.escape(slug)}_(.+)$", Path(path).name)
+    if not m:
+        return None
+    cands = [ROOT / "products" / slug / d / m.group(1) for d in ("user", "org", "app", "isolated")]
+    cands = [c for c in cands if c.is_file()]
+    body = read(path)
+    for c in cands:
+        if read(c) == body:
+            return rel(c)
+    return rel(cands[0]) if cands else None
+
+
 def rel_to(p, base):
     try:
         return str(Path(p).relative_to(base)).replace("\\", "/")
@@ -572,6 +600,9 @@ def main():
     for f in core_funcs:
         areas[core_area_of(f["name"], None, "f")]["functions"].append(f)
     core = {"areas": [a for a in areas.values() if a["tables"] or a["functions"]], "files": core_files}
+    core_doc = load_content("core")
+    if core_doc:
+        core["doc"] = core_doc
 
     products = discover_products()
     for slug, name, repo, form, clients, ex_paths, ex_label in products:
@@ -582,7 +613,12 @@ def main():
         single_files = build_files("single", sql_files(pdir / "user") + app)
         tenant_files = build_files("tenant", sql_files(pdir / "org") + app)
         isolated_files = build_files("isolated", sql_files(pdir / "isolated"))
-        mono_files = build_files("monorepo", [p for p in sql_files(ROOT / "bundles" / "monorepo" / "supabase" / "migrations") if f"_{slug}_" in p.name])
+        mono_paths = [p for p in sql_files(ROOT / "bundles" / "monorepo" / "supabase" / "migrations") if f"_{slug}_" in p.name]
+        mono_files = build_files("monorepo", mono_paths)
+        for f, mp in zip(mono_files, mono_paths):  # 설명 매칭용 원본 경로(단일·테넌트·격리형은 path가 곧 원본)
+            src = mono_source(slug, mp)
+            if src:
+                f["src"] = src
         variants, files = {}, []
         for key, fl in (("existing", ex_files), ("single", single_files), ("tenant", tenant_files), ("monorepo", mono_files), ("isolated", isolated_files)):
             tabs = finish_tables(schema_from(fl), renames=None if key == "existing" else renames)
@@ -591,6 +627,9 @@ def main():
         prod_out.append({"slug": slug, "name": name, "repo": repo, "form": form, "clients": clients, "placeholder": False,
                          "note": f"products/{slug}/existing.md · " + (f"원본 {len(ex_files)}개 SQL 최종 상태" if ex_files else "기존 SQL 없음"),
                          "variants": variants, "local_storage": parse_local_storage(slug), "files": files})
+        doc = load_content(slug)
+        if doc:
+            prod_out[-1]["doc"] = doc
 
     # 번들 전체 SQL (단일·테넌트·모노레포) — 이어 붙여 data/bundles/*.sql 로 쓴다. bundles/ 가 없으면 건너뛴다(화면에서 숨김).
     bundle_texts = {}
@@ -607,6 +646,9 @@ def main():
 
     tz = timezone(timedelta(hours=9))
     data = {"generated_at": datetime.now(tz).isoformat(timespec="seconds"), "products": prod_out, "core": core, "bundles": bundles}
+    cats = load_content("_categories")
+    if cats and isinstance(cats.get("categories"), list):
+        data["categories"] = cats["categories"]
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))  # 한 줄(용량 절약)
     for label, body in [("schema.json", text)] + [(f"bundles/{k}", v) for k, v in bundle_texts.items()]:
         hit = find_secret(body)

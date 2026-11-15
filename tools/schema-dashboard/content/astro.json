@@ -1,0 +1,104 @@
+{
+  "slug": "astro",
+  "icon": "🔮",
+  "tagline": "사주·타로 리딩과 PDF 발송",
+  "overview": "신비로운AI(astro)의 DB로, 사용자가 본인·가족·지인 프로필로 사주·타로·통합 리딩을 받고 PDF로 렌더해 이메일로 받는다. 프로필 보관함·리딩·PDF 렌더 이력·발송 outbox·동의 증빙·설정과 전역 PDF 테마를 담는다. 리딩 기능(reading)과 AI 기능은 A·B·C 전 플랜에 열려 있어 구독이 끊겨도 크레딧으로 계속 쓰며, 잠기는 경우는 조직 비활성·멤버 아님(개인형은 활성 개인 조직 없음)뿐이다. 리딩 1건은 크레딧 차감 1건·작업 1건과 연결되고, 이름·생년월일시·질문·수신자는 앱 계층 암호문으로만 저장되며 사용자에게 그 컬럼 권한이 없다. 쓰기는 대부분 서버(service_role)이고 anon은 list_themes RPC만 쓴다.",
+  "diagrams": [
+    {
+      "title": "리딩·발송 흐름",
+      "mermaid": "flowchart LR\n  Anon[비로그인 anon] --> LT[list_themes]\n  LT --> TH[themes]\n  User[사용자] --> PF[preferences 직접 쓰기]\n  User --> CR[cancel_reading]\n  CR --> RD[readings]\n  CR --> CORE[\"nomad_core 작업 취소·크레딧 환불\"]\n  Server[서버 service_role] --> SB[\"subjects(암호문)\"]\n  Server --> RD\n  Server --> RR[reading_renders]\n  Server --> CS[consents]\n  Server --> DL[deliveries]\n  Worker[발송 워커] --> CDD[claim_due_deliveries]\n  Worker --> FD[finish_delivery]\n  CDD --> DL\n  FD --> DL"
+    },
+    {
+      "title": "리딩 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> queued\n  queued --> generating\n  queued --> failed\n  queued --> canceled: cancel_reading\n  generating --> rendering\n  generating --> queued\n  generating --> failed\n  rendering --> completed\n  rendering --> queued\n  rendering --> failed\n  completed --> [*]"
+    }
+  ],
+  "files": {
+    "products/astro/org/0001_astro.sql": {
+      "summary": "nomad_astro 스키마와 astro 제품·플랜(A/B/C)·기능 reading을 등록한다. 조직 소유 7개 표와 상태 전이·과금 연결 트리거, 공개 테마 RPC·리딩 취소 RPC·발송 워커 RPC, Realtime 구독, 기본 테마 2종을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["themes", "전역 PDF 테마 레지스트리, 로그인 사용자는 활성 테마만 읽고 쓰기는 service_role"],
+            ["subjects", "프로필 보관함(본인·가족·지인), 이름·생년월일시는 암호문, 쓰기는 서버만"],
+            ["readings", "사주·타로·통합 리딩과 진행률·크레딧 차감·작업 연결, request_id 멱등, 질문 암호문은 사용자 권한 없음"],
+            ["reading_renders", "PDF 렌더 이력(queued·rendering·succeeded·failed), 경로 <organization_id>/astro/pdf/, request_id 멱등"],
+            ["deliveries", "이메일 발송 outbox(pending·sending·sent·dead·skipped), 수신자 암호문은 사용자 권한 없음"],
+            ["consents", "약관·개인정보·제3자 생년월일시·국외 이전·마케팅·음성 동의 증빙, append-only, 철회는 새 행"],
+            ["preferences", "조직별 기본 테마·이메일 발송 on/off, owner·admin·editor 직접 쓰기"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["list_themes()", "anon 포함 공개 테마 목록(읽기 전용)"],
+            ["cancel_reading(p_reading_id)", "queued 리딩만 취소, 작업이 있으면 nomad_core.cancel_job·없으면 원장 환불, 남의 조직 리딩은 존재 비노출"],
+            ["claim_due_deliveries(p_worker_id, p_limit)", "service_role 워커가 발송 대상을 SKIP LOCKED로 집음"],
+            ["finish_delivery(…)", "service_role 발송 결과 반영, 실패는 기본 5분 뒤 재시도·횟수 소진 시 dead"],
+            ["has_access(p_organization)", "정책 도우미: 멤버+reading 기능"],
+            ["내부 트리거", "updated_at 갱신, 리딩·렌더·발송 상태 전이(AS001), 같은 조직 원장·작업만 연결, 완료 시 mark_job_delivered, preferences.updated_by를 실제 호출자로 고정"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, has_access(멤버+기능)로 같은 조직만, DELETE 정책 없음(조직 삭제 cascade만)"],
+            ["암호문 컬럼 차단", "subjects·readings·deliveries의 암호문 컬럼은 컬럼 권한에서 제외"],
+            ["동의 증빙 열람", "본인 기록 또는 owner/admin만(잠김과 무관)"],
+            ["Realtime", "readings·reading_renders 진행률(RLS 적용)"]
+          ]
+        }
+      ]
+    },
+    "products/astro/org/0002_ai.sql": {
+      "summary": "AI 기능 이용권 ai_chat(내 사주 AI 대화)·voice_chat(음성 질문)·narration(리딩 낭독)을 A·B·C 모두에 열고, 플랫폼 기본 AI 라우팅 값을 넣은 뒤 체인 제공자를 검사한다. user안과 같은 공통 파일이다.",
+      "parts": [
+        {
+          "title": "기능·설정",
+          "items": [
+            ["AI 이용권", "ai_chat·voice_chat·narration, 일일 대화 한도는 plan_limits 키(시드 없음)"],
+            ["AI 라우팅 기본값", "organization_id null 행으로 기능별 제공자 체인, 제공자 존재·종류·오픈소스 모드 검사"]
+          ]
+        }
+      ]
+    },
+    "products/astro/user/0001_astro.sql": {
+      "summary": "개인형 astro: 같은 7개 표를 user_id 소유로 만들고, 크레딧·작업·감사·이용권은 사용자의 개인(owner) 조직 하나로 본다. 같은 공개 테마·리딩 취소·발송 워커 RPC를 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["themes", "전역 PDF 테마, 비로그인은 list_themes RPC만"],
+            ["subjects", "본인 프로필 보관함(암호문), 쓰기는 서버만"],
+            ["readings", "본인 리딩, request_id 멱등·상태 전이 트리거"],
+            ["reading_renders", "PDF 렌더 이력, 경로 <user_id>/astro/pdf/"],
+            ["deliveries", "이메일 발송 outbox"],
+            ["consents", "본인 동의 증빙, append-only"],
+            ["preferences", "사용자별 기본 테마·이메일 발송 설정, 본인 직접 쓰기"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["list_themes / cancel_reading / claim_due_deliveries / finish_delivery", "org안과 같은 역할(리딩 취소는 본인 리딩만)"],
+            ["personal_organization(p_user) / has_access(p_user)", "개인 조직 찾기(내부)와 본인 행+개인 조직 이용권 판정"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [["본인 격리", "모든 표 RLS user_id = auth.uid(), 암호문 컬럼 차단, DELETE는 사용자 삭제 cascade만"]]
+        }
+      ]
+    },
+    "products/astro/user/0002_ai.sql": {
+      "summary": "org안 0002_ai.sql과 같은 공통 파일로, AI 이용권(ai_chat·voice_chat·narration)과 플랫폼 기본 AI 라우팅 값을 넣는다."
+    },
+    "products/astro/check_org.sql": {
+      "summary": "조직 2곳 교차 접근 거부, anon은 list_themes만, 암호문 컬럼 차단, 역할별 쓰기, 리딩 취소(작업 취소·크레딧 환불), 상태 전이, 발송 outbox, 잠김 회귀, AI 라우팅을 합성 데이터로 검사하고 rollback한다."
+    },
+    "products/astro/check_user.sql": {
+      "summary": "사용자 2명 교차 접근 거부, anon은 list_themes만, 암호문 컬럼 차단, 개인 조직 리딩 취소·환불, 상태 전이, 발송 outbox, 잠김 회귀, AI 라우팅을 합성 데이터로 검사하고 rollback한다."
+    }
+  }
+}

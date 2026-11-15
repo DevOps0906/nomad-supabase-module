@@ -1,0 +1,73 @@
+{
+  "slug": "contentflow",
+  "icon": "✍️",
+  "tagline": "블로그 글 기획·검수·승인·발행 관리",
+  "overview": "조직(nomad_core.organizations)의 owner·admin·editor·viewer와, 제품 표 reviewers로 지정한 검수자가 함께 쓴다. 블로그 계정·키워드·출처·글 작업본과 승인 스냅샷, 발행 시도, 광고 수익·비용·외부 지표 입력값을 담는다. 활성 블로그 수는 plan_limits 키(included_blogs·max_blogs·overage_allowed)로 막고, 한도가 정의되지 않으면 블로그 생성을 거부한다(ENTITLEMENT_MISSING). 글 상태 전이·승인은 트리거 enforce_article_rules가 결정하며, 승인 스냅샷(article_versions)·승인(approvals)·감사 로그는 추가 전용이다. 모든 표 RLS, 요청 제한 카운터는 비노출 스키마에서 함수로만 접근한다.",
+  "diagrams": [
+    {
+      "title": "글 상태 전이(article_transition_allowed)",
+      "mermaid": "stateDiagram-v2\n  [*] --> idea\n  idea --> researching\n  researching --> briefing\n  briefing --> drafting\n  drafting --> qa_pending\n  qa_pending --> needs_revision\n  qa_pending --> approval_pending\n  needs_revision --> drafting\n  approval_pending --> approved\n  approval_pending --> needs_revision\n  approved --> export_ready\n  approved --> drafting\n  export_ready --> manual_pending\n  export_ready --> publishing\n  export_ready --> drafting\n  manual_pending --> published\n  manual_pending --> export_ready\n  publishing --> draft_created\n  publishing --> publish_failed\n  publish_failed --> publishing\n  publish_failed --> manual_pending\n  publish_failed --> drafting\n  draft_created --> published\n  draft_created --> drafting\n  published --> monitoring\n  published --> update_due\n  monitoring --> update_due\n  update_due --> drafting"
+    },
+    {
+      "title": "승인과 발행 확인 흐름",
+      "mermaid": "flowchart LR\n  E[editor 이상] -->|글 작성·상태 변경| A[articles]\n  R[owner·admin·검수자] -->|approved로 변경| T[\"enforce_article_rules 트리거\"]\n  A --> T\n  T -->|스냅샷| V[article_versions]\n  T -->|승인 행| P[approvals]\n  T -->|article.approved| L[audit_logs]\n  A -->|상태 바뀜| S[article_state_events]\n  A -->|manual_pending| D[delivery_attempts]\n  SV[발행기] -->|해시 대조| C[\"article_delivery_check(article, renderer)\"]\n  C --> V\n  C --> P"
+    }
+  ],
+  "files": {
+    "products/contentflow/org/0001_contentflow.sql": {
+      "summary": "nomad_contentflow·nomad_contentflow_private 스키마와 글 상태·플랫폼 enum, 표 17개, 상태 전이·승인·한도 트리거, RLS와 최소 grant를 만든다. 제품 코드 contentflow를 nomad_core.products에 등록한다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["reviewers", "조직 멤버 중 검수자 지정(nomad_core 역할에 reviewer가 없어 보강)"],
+            ["blogs", "블로그 계정(wordpress·tistory·blogger·naver), active/archived, 활성 수는 plan_limits 한도"],
+            ["keywords", "조직 키워드(정규화 키 phrase_key로 중복 방지, 소프트 삭제 행 제외)"],
+            ["sources", "글 출처 URL과 라이선스 메모"],
+            ["articles", "글 작업본과 상태(idea→…→published), 근거·권리 검토 상태"],
+            ["article_versions", "승인 시점 글 스냅샷과 내용 해시(추가 전용)"],
+            ["approvals", "승인 결정(추가 전용)"],
+            ["audit_logs", "감사 로그(추가 전용), blog.* 행은 트리거만 기록"],
+            ["revenue_rows", "광고 수익 리포트 행(통화별 소수 금액, 리포트 기간 겹침 거부)"],
+            ["agent_runs", "AI 초안·검수 호출 로그(정산 근거 아님)"],
+            ["article_state_events", "글 상태 전이 이력(트리거만 기록)"],
+            ["delivery_attempts", "글별 발행 시도 이력(wordpress·manual, 회차 번호는 트리거가 매김)"],
+            ["site_checks", "운영자가 기록하는 사이트 준비·광고 상태(조직당 항목별 1건)"],
+            ["cost_entries", "운영자가 직접 입력한 제작 비용"],
+            ["improvement_tasks", "근거 기반 개선 작업 큐(담당자·검토일·결과 버전)"],
+            ["keyword_trends", "운영자가 넣은 키워드 측정값(출처·날짜 포함)"],
+            ["blog_metric_snapshots", "외부 도구가 보여준 블로그 지표(도구·날짜·근거 포함)"],
+            ["blog_usage_snapshots", "월별(Asia/Seoul) 활성 블로그 최대치와 초과 슬롯(트리거 기록, 금액 없음)"],
+            ["nomad_contentflow_private.rate_limits", "공유 요청 제한 카운터(비노출, rate_limit_hit만 접근)"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["is_reviewer(target_organization)", "호출자가 해당 조직의 검수자인지"],
+            ["has_role(target_organization, roles, include_reviewer)", "호출자 역할이 목록에 있는지(검수자 포함 선택)"],
+            ["article_delivery_check(p_article_id, p_renderer_version)", "발행 전 승인 스냅샷 해시·렌더러 버전 대조 결과(ok·reason)"],
+            ["workspace_members(ws)", "조직 멤버 목록(이메일·역할·검수자 여부), 멤버만 조회"],
+            ["rate_limit_hit(p_key, p_max, p_window_seconds)", "요청 제한 카운트 후 초과 여부, anon도 실행 가능"],
+            ["cf_norm_key · article_transition_allowed · article_review_ok · article_brief_ok · article_content_hash_v2", "정규화 키·전이 허용·검수/브리프 조건·내용 해시 계산 도우미"],
+            ["내부 트리거 함수", "enforce_article_rules·enforce_blog_limits·meter_blog_usage·record_article_transition·number_delivery_attempt·입력 상한(enforce_*_cap)·stamp_*·forbid_mutation"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, 같은 조직 멤버만 읽기·쓰기, 복합 FK로 다른 조직 행 참조 차단"],
+            ["역할", "블로그·검수자 지정은 owner/admin, 키워드·출처·글 쓰기는 editor 이상, 키워드의 블로그 지정은 owner/admin"],
+            ["승인", "owner·admin·검수자만, 근거·권리 상태가 모두 ok여야 하며 승인 시 스냅샷·승인·감사 행을 트리거가 생성"],
+            ["블로그 한도", "포함 수 초과는 overage_allowed와 owner 확인(overage_ack) 필요, max_blogs 초과 BLOG_LIMIT_REACHED"],
+            ["입력 상한", "조직당 키워드 5000·수익 행 20000·키워드 측정 20000·블로그 지표 30000"],
+            ["추가 전용", "article_versions·approvals·audit_logs는 수정·삭제 금지 트리거"]
+          ]
+        }
+      ]
+    },
+    "products/contentflow/check_org.sql": {
+      "summary": "조직 2곳 교차 접근 거부, 역할별 권한, 승인 흐름, 블로그 한도, 동기화 컬럼을 합성 데이터로 검사하고 rollback한다."
+    }
+  }
+}

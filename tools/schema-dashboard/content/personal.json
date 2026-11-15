@@ -1,0 +1,144 @@
+{
+  "slug": "personal",
+  "icon": "🔮",
+  "tagline": "꿈해몽·사주·타로 풀이와 여행 계획",
+  "overview": "꿈·사주·타로 풀이 기록, 풀이 리포트(PDF), 생년월일 프로필, 여행 계획을 담는다. 조직형(org)과 개인형(user) 두 이식본이 있고, 기능은 divination(C·B·A)·report_save(B·A)·trip_planner(B·A)로 잠근다. 생년월일과 풀이 입력은 앱 서버가 AES-256-GCM으로 암호화한 암호문만 저장하며 사용자 역할에는 그 컬럼 권한이 없다. 잠기면(구독 끊김·조직 비활성) 읽기·쓰기가 모두 막히고 개인정보 삭제 RPC만 열린다.",
+  "diagrams": [
+    {
+      "title": "조직형 접근 흐름",
+      "mermaid": "flowchart LR\n  W[작성자] -->|divination| R[readings]\n  W -->|report_save| SR[saved_reports]\n  W -->|divination 읽기·삭제| BP[birth_profiles]\n  SRV[\"앱 서버 service_role\"] -->|암호문 쓰기| BP\n  SRV -->|입력 암호문| R\n  SRV -->|pdf_path| SR\n  M[조직 멤버] -->|trip_planner 읽기| TR[trips]\n  E[\"owner·admin·editor\"] -->|trip_planner 쓰기| TR\n  TR --> TD[trip_days]\n  OA[\"owner·admin\"] --> ER[erase_personal_data]\n  W --> ER\n  ER --> R\n  ER --> SR\n  ER --> BP"
+    }
+  ],
+  "files": {
+    "products/personal/org/0001_personal.sql": {
+      "summary": "조직형 nomad_personal 스키마와 제품·플랜·기능 시드를 만든다. 민감 표(풀이·리포트·생년월일)는 같은 조직 안에서도 작성자 본인만, 여행 표는 조직 공유다. 잠긴 뒤·탈퇴자 데이터 삭제는 erase_personal_data로 연다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            [
+              "readings",
+              "꿈·사주·타로 풀이(입력 암호문, 결과 평문 result_md), 작성자만"
+            ],
+            [
+              "saved_reports",
+              "저장한 풀이 리포트, 같은 조직·작성자 풀이만 참조, pdf_path는 서버만 기록"
+            ],
+            [
+              "birth_profiles",
+              "조직 안 사용자별 생년월일 암호문·성별, 쓰기는 서버만"
+            ],
+            [
+              "trips",
+              "여행 계획(조직 공유)"
+            ],
+            [
+              "trip_days",
+              "여행 일자별 계획과 날씨·환율 도구 값"
+            ]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            [
+              "erase_personal_data(org, user)",
+              "본인 또는 owner·admin(탈퇴자만)이 민감 표 삭제, 지운 PDF 경로 반환, 남의 것은 감사"
+            ],
+            [
+              "트리거",
+              "updated_at 갱신(nomad_core.touch_updated_at)"
+            ]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            [
+              "민감 표",
+              "작성자 본인 + 기능 열림(has_feature)일 때만 읽기·쓰기·삭제"
+            ],
+            [
+              "여행 표",
+              "멤버 읽기, owner·admin·editor 쓰기·삭제, trip_planner 필요"
+            ],
+            [
+              "암호문 컬럼",
+              "authenticated에 읽기·쓰기 권한 없음"
+            ],
+            [
+              "삭제 대상 제한",
+              "현직 멤버의 데이터는 owner·admin도 지울 수 없음(42501)"
+            ]
+          ]
+        }
+      ]
+    },
+    "products/personal/user/0001_personal.sql": {
+      "summary": "개인형 nomad_personal 스키마와 제품·플랜·기능 시드를 만든다. 모든 표가 본인 행만이며, 기능은 사용자의 개인 조직(owner, personal) 이용권으로 판정한다. 잠긴 뒤에도 erase_my_data로 본인 데이터 전체를 지울 수 있다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            [
+              "readings",
+              "꿈·사주·타로 풀이(입력 암호문, 결과 평문)"
+            ],
+            [
+              "saved_reports",
+              "저장한 풀이 리포트(경로 <user_id>/personal/…)"
+            ],
+            [
+              "birth_profiles",
+              "생년월일 암호문·성별, 쓰기는 서버만"
+            ],
+            [
+              "trips",
+              "여행 계획"
+            ],
+            [
+              "trip_days",
+              "여행 일자별 계획, 본인 여행에만 붙음(복합 FK)"
+            ]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            [
+              "has_access(user, feature)",
+              "본인 행 + 개인 조직 이용권 판정(정책 도우미)"
+            ],
+            [
+              "erase_my_data()",
+              "본인 데이터 전체 삭제, 지운 PDF 경로 반환"
+            ],
+            [
+              "내부 도우미·트리거",
+              "personal_organization(API 역할 실행 불가), updated_at 갱신"
+            ]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            [
+              "본인 행만",
+              "readings·birth_profiles는 divination, saved_reports는 report_save, 여행은 trip_planner"
+            ],
+            [
+              "암호문 컬럼",
+              "authenticated에 읽기·쓰기 권한 없음"
+            ]
+          ]
+        }
+      ]
+    },
+    "products/personal/check_org.sql": {
+      "summary": "조직형 검사: 조직 간 교차 접근 0, 민감 표 작성자 한정, 복합 FK, 여행 공유(viewer 읽기만), 잠김·탈퇴·비활성에도 erase_personal_data 삭제를 합성 데이터로 확인하고 롤백한다."
+    },
+    "products/personal/check_user.sql": {
+      "summary": "개인형 검사: 사용자 간 교차 접근 0, 복합 FK, PDF 경로 접두, 기능 잠금, 잠김에도 본인 삭제 가능을 합성 데이터로 확인하고 롤백한다."
+    }
+  }
+}

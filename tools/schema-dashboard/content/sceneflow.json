@@ -1,0 +1,103 @@
+{
+  "slug": "sceneflow",
+  "icon": "🎞️",
+  "tagline": "숏폼·롱폼 영상 제작과 게시 DB",
+  "overview": "조직이 채널을 연결하고 쇼츠·스토리보드(Track S)·음원·플레이리스트·랜딩·링크인바이오를 만들어 플랫폼에 게시하는 SceneFlow의 조직형 이식본이다. 같은 조직 멤버(studio)가 읽고, 콘텐츠 표는 editor 이상이 컬럼 grant와 정책으로 쓰며 상태·버전·결과물은 서버(service_role)와 RPC만 바꾼다. 플랜 C(무료)는 studio·track_a·ai_chat·voice_chat만, B는 스토리보드·AI 편집·컴플라이언스 등, A는 대행(agency)·4K60 렌더 등을 더 연다. 정책 식에 기능을 넣어 구독이 끊기면 신규 생성뿐 아니라 기존 행 수정·게시·렌더도 잠긴다. 방문자(anon)는 공개 랜딩·링크인바이오 RPC로만 읽고, 렌더는 크레딧 선차감·실패 시 환불을 한 트랜잭션으로 처리한다.",
+  "diagrams": [
+    {
+      "title": "스토리보드 렌더 흐름",
+      "mermaid": "flowchart LR\n  U[사용자] --> SS[save_scene / add_scene]\n  SS --> SC[(scenes)]\n  U --> AE[apply_edit_plan]\n  AE --> EP[(edit_plans)]\n  SV[서버] --> AR[apply_storyboard_result]\n  AR --> SB[(storyboards)]\n  SV --> FA[finish_scene_asset]\n  FA --> SA[(scene_assets)]\n  SV --> SR[start_cut_render]\n  SR --> SN[(storyboard_snapshots)]\n  SR --> CU[(storyboard_cuts)]\n  SR --> CR[(nomad_core.credit_ledger)]\n  SR --> JB[(nomad_core.jobs)]\n  W[워커] --> OU[(outputs)]\n  W --> FR[finish_cut_render]\n  W --> FF[fail_cut_render]\n  FR --> CU\n  FF --> CR"
+    },
+    {
+      "title": "스토리보드 상태",
+      "mermaid": "stateDiagram-v2\n  [*] --> draft\n  draft --> ready: apply_storyboard_result\n  ready --> draft\n  ready --> rendering: snapshot_storyboard\n  rendering --> rendered: finish_cut_render\n  rendering --> ready: fail_cut_render\n  rendered --> ready: 장면 수정\n  rendered --> rendering\n  draft --> archived\n  ready --> archived\n  rendered --> archived"
+    }
+  ],
+  "files": {
+    "products/sceneflow/org/0001_sceneflow.sql": {
+      "summary": "스키마 nomad_sceneflow·nomad_sceneflow_private와 표 36개, 기능 이용권 29개와 플랜 A·B·C 기능 매핑, 비공개 Storage 버킷 sceneflow-media, 스토리보드 템플릿 5종을 만든다. 상태 전이는 트리거 표로 강제하고, 사용자 쓰기는 컬럼 grant+정책, 상태 변경은 SECURITY DEFINER RPC와 서버만 한다. 렌더 1건은 스냅샷·크레딧 선차감·nomad_core.jobs 등록을 한 트랜잭션으로 묶는다.",
+      "parts": [
+        { "title": "표 · 채널·소싱·생산", "items": [
+          ["channels", "플랫폼 채널. 연결은 서버, 설정·해제·위험 동의는 RPC, 키는 provider_credentials에만"],
+          ["trend_videos", "공용 트렌드 수집. 쓰기 서버, 읽기는 radar 기능 조직 멤버"],
+          ["radar_reports", "조직별 트렌드 레이더 결과(쓰기 서버)"],
+          ["sources", "소싱 원본(requested→downloading→ready→purged, 쓰기 서버)"],
+          ["productions", "숏폼 생산 요청(쓰기 서버, 크레딧은 서버가 nomad_core로 차감)"]
+        ] },
+        { "title": "표 · 롱폼·음원·공개 페이지", "items": [
+          ["longform_projects", "Track D 롱폼(Track S로 대체), 콘텐츠 컬럼만 사용자 편집(track_d)"],
+          ["longform_sections", "Track D 섹션(Track S scenes로 대체)"],
+          ["longform_highlights", "Track D OSMU 하이라이트(쓰기 서버)"],
+          ["music_tracks", "Track E 단일 곡(Suno), 제목만 사용자, 유통 상태는 RPC"],
+          ["music_library", "Track F 라이선스 곡(증빙 필수), 사용자 쓰기(track_f), 소프트 삭제"],
+          ["playlists", "Track F 플레이리스트, draft만 편집, 소프트 삭제"],
+          ["playlist_items", "플레이리스트 곡(Suno 곡 또는 라이선스 곡 하나)"],
+          ["landing_pages", "공개 랜딩(coupang_landing), 생성 서버, 문구만 사용자, 공개는 set_landing_status"],
+          ["linkinbio_profiles", "링크인바이오 프로필(조직당 1), 쓰기 owner·admin"],
+          ["linkinbio_items", "링크인바이오 항목, editor 이상 쓰기"]
+        ] },
+        { "title": "표 · 스토리보드(Track S)·편집", "items": [
+          ["storyboard_templates", "공용 스토리보드 템플릿 카탈로그(쓰기 service_role, 읽기 storyboard 기능)"],
+          ["edit_presets", "조직·고객별 편집 프리셋(한도 edit_presets_max)"],
+          ["storyboards", "스토리보드. 콘텐츠·렌더 설정만 사용자, 상태·버전·revision은 서버·RPC, 소프트 삭제"],
+          ["scenes", "장면. 쓰기는 save_scene 등 RPC(revision 낙관적 동시성)와 서버만"],
+          ["scene_assets", "장면 소재(이전 소재는 superseded), 쓰기 서버(finish_scene_asset)"],
+          ["storyboard_cuts", "렌더 단위(master·short·variant), 쓰기 서버·RPC"],
+          ["storyboard_snapshots", "렌더 스냅샷(읽기 전용, service_role도 수정 거부)"],
+          ["edit_plans", "AI 편집안. 쓰기 서버, 사용자는 apply·undo·reject RPC(ai_edit)"],
+          ["clip_transcripts", "업로드 클립 단어 전사(쓰기 서버)"],
+          ["pronunciation_lexicon", "조직 발음 사전(조직당 2,000개), 사용자 쓰기"],
+          ["workflows", "자동화 캔버스 저장, 사용자 쓰기, 소프트 삭제"]
+        ] },
+        { "title": "표 · 결과물·게시·대행", "items": [
+          ["outputs", "렌더 결과물. 쓰기 서버, 소유 잡이 failed·canceled면 ready 거부"],
+          ["uploads", "플랫폼 게시 1건(대가성 문구 CHECK, 컴플라이언스·고객 승인 게이트)"],
+          ["upload_links", "업로드에 넣은 제휴 링크(nomad_core.affiliate_links)"],
+          ["compliance_checks", "업로드 전 검사 결과(append-only, 쓰기 서버)"],
+          ["analytics_snapshots", "게시물 성과 수집(쓰기 서버)"],
+          ["banned_words", "조직이 추가한 컴플라이언스 금칙어"],
+          ["clients", "대행 고객(agency), 쓰기 owner·admin, 상태는 set_client_status, 소프트 삭제"],
+          ["client_channels", "고객과 운영 채널 연결(한 채널은 한 고객)"],
+          ["client_reviews", "고객 승인 요청(토큰 해시만 저장, 사용자에게 token_hash 미노출)"],
+          ["client_reports", "고객 월간 리포트(쓰기 서버)"]
+        ] },
+        { "title": "함수(RPC) · 사용자", "items": [
+          ["has_access·can_write·has_feature·caller_has_feature", "정책·앱이 쓰는 판정 함수(멤버+studio, 역할+기능)"],
+          ["update_channel_settings·disconnect_channel", "owner·admin이 채널 설정 변경·연결 해제(키 폐기)"],
+          ["consent_clip_automation_risk·revoke_clip_automation_consent", "네이버 클립 자동 업로드 위험 동의(현재 고지문 버전 필요)와 철회"],
+          ["acknowledge_compliance_warning(p_upload_id, p_note)", "컴플라이언스 경고 수동 확인(awaiting_confirm→approved)"],
+          ["cancel_upload(p_upload_id)", "업로드 취소, 대기 중 업로드 잡은 nomad_core.cancel_job으로 환불 포함 취소"],
+          ["set_landing_status·set_music_distribution_status·set_client_status", "랜딩 공개 상태·음원 유통 상태·대행 고객 상태 변경"],
+          ["save_scene·reorder_scenes·add_scene·delete_scene·set_shorts_candidate", "장면 편집(revision 불일치 VD409, 장면 수 상한 VD018)"],
+          ["apply_edit_plan·undo_edit_plan·reject_edit_plan", "AI 편집안 적용(전체 롤백)·최근 적용 되돌리기·거절"]
+        ] },
+        { "title": "함수(RPC) · 서버·공개", "items": [
+          ["open_client_review·decide_client_review", "고객 승인 요청 열기(토큰 해시)와 결정 기록(만료면 expired)"],
+          ["purge_expired_sources(p_limit)", "보존 기간 지난 ready 원본을 purged로 바꾸고 Storage 경로를 돌려준다"],
+          ["reset_channel_quotas()", "YouTube 일일 쿼터 리셋(스케줄러)"],
+          ["record_landing_view(p_slug)", "랜딩 조회수 +1(잠긴 조직 랜딩은 세지 않음)"],
+          ["apply_storyboard_result·finish_scene_asset", "AI 그래프 결과로 장면 채우기(draft→ready), 장면 소재 기록"],
+          ["snapshot_storyboard·start_cut_render", "렌더 스냅샷을 만들고 크레딧 선차감+잡 등록, 같은 request_id는 기존 렌더 반환"],
+          ["finish_cut_render·fail_cut_render", "렌더 완료 처리, 최종 실패 시 컷 failed와 선차감 환불"],
+          ["get_public_landing·get_public_linkinbio", "anon 방문자의 유일한 경로, 공개 행의 공개 컬럼만 jsonb"],
+          ["내부 트리거 함수(nomad_sceneflow_private)", "상태 전이·사용자 편집 잠금·소프트 삭제·참조 조직 일치·채널 수·스토리보드 한도·스냅샷 읽기 전용 검사"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 읽기는 같은 조직 멤버+studio(구독이 끊겨도 읽기는 남음)"],
+          ["기능 잠금", "쓰기 정책에 기능을 넣어 구독이 끊기면 기존 행 수정·게시·렌더도 잠긴다"],
+          ["anon", "표 grant 없음, 공개 읽기 RPC 두 개만 실행"],
+          ["Storage", "비공개 버킷 sceneflow-media(5GB), 경로 첫 폴더 조직의 멤버+studio만 읽고 쓰기는 서버만"]
+        ] }
+      ]
+    },
+    "products/sceneflow/org/0002_ai.sql": {
+      "summary": "nomad_core.ai_routing_settings에 sceneflow 기능별 AI·음성 라우팅 기본값(플랫폼 기본, organization_id null)을 넣는다. 대본·번역·채팅은 Claude 먼저, 분석·컴플라이언스·위키는 오픈소스 먼저, dify.aux·STT·임베딩은 오픈소스 강제다.",
+      "parts": [
+        { "title": "데이터", "items": [
+          ["ai_routing_settings 시드", "video.script·translate·analyze·bling·compliance, chat, wiki.*, dify.aux, video.knowledge·rag·stt, narration 등 기능별 제공자 순서"]
+        ] }
+      ]
+    },
+    "products/sceneflow/check_org.sql": { "summary": "조직형 검사: 조직 2곳 교차 접근 거부, 역할별 권한, 공개 RPC·anon, 기능 잠금, 크레딧 선차감·환불·잡, 구독 끊김 잠김 회귀, 소프트 삭제, AI 시드를 합성 데이터로 확인하고 rollback한다." }
+  }
+}

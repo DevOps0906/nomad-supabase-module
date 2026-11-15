@@ -1,0 +1,60 @@
+{
+  "slug": "humscore",
+  "icon": "🎼",
+  "tagline": "악보·찬양 콘티 저장과 공유 링크",
+  "overview": "악보(Score 객체 jsonb), 찬양 콘티(setlist), 읽기 전용 공유 링크, 음원 변환 작업 큐를 담는다. 조직형(org)은 조직 멤버 읽기·owner/admin/editor 쓰기, 개인형(user)은 소유자 본인만 접근한다. 이 SQL은 플랜·기능 잠금 함수를 쓰지 않는다. 공유 링크는 토큰 해시만 저장하고 익명 열람은 get_shared_score·get_shared_setlist RPC로만 하며, 악보·콘티를 소프트 삭제하면 링크가 자동으로 폐기된다. 변환 작업은 사용자가 queued로 등록만 하고 상태는 워커(service_role)가 바꾼다.",
+  "diagrams": [
+    {
+      "title": "주요 흐름",
+      "mermaid": "flowchart LR\n  ED[\"편집자 또는 소유자\"] --> SC[scores]\n  ED --> SL[setlists]\n  ED --> SH[share_links]\n  ED -->|queued 등록| TJ[transcription_jobs]\n  ED --> RI[reissue_share_link]\n  RI --> SH\n  WK[\"워커 service_role\"] -->|상태 갱신| TJ\n  AN[익명 방문자] --> GS[get_shared_score]\n  AN --> GL[get_shared_setlist]\n  GS --> SH\n  GL --> SH\n  GS --> SC\n  GL --> SL\n  SL -->|items가 참조| SC\n  SC -->|소프트 삭제 시 폐기| SH"
+    }
+  ],
+  "files": {
+    "products/humscore/org/0001_humscore.sql": {
+      "summary": "조직형 nomad_humscore 스키마와 내부 스키마 nomad_humscore_private를 만든다. 조직 멤버는 읽고 owner·admin·editor가 쓴다. 악보는 클라이언트 updated_at 기준 LWW로 동기화한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["scores", "악보(Score jsonb), 소프트 삭제, 조직당 활성 2000개 한도"],
+          ["setlists", "찬양 콘티(items jsonb 최대 50곡, 같은 조직의 살아 있는 악보만 참조), 조직당 활성 2000개 한도"],
+          ["share_links", "악보 또는 콘티 하나의 읽기 전용 공유 링크(토큰 SHA-256 해시, 만료·폐기), 조직당 활성 200개 한도"],
+          ["transcription_jobs", "변환 작업 큐(separate·transcribe_multi·arrange, queued·running·done·failed)"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["get_shared_score(token)", "익명 포함 누구나 유효 토큰으로 악보 제목·데이터 열람"],
+          ["get_shared_setlist(token)", "익명 포함 누구나 유효 토큰으로 콘티와 포함 악보 열람"],
+          ["reissue_share_link(score, token_hash, expires_at)", "기존 활성 링크를 끄고 새 링크 발급(invoker, RLS 적용)"],
+          ["setlist_items_valid(items)", "콘티 items 형태 검사(CHECK용)"],
+          ["트리거 함수", "updated_at 보정·LWW·한도·조직 변경 금지·items 소유 검사·링크 자동 폐기·링크 부활 금지"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 읽기는 조직 멤버, 쓰기는 owner·admin·editor"],
+          ["변환 작업", "사용자는 status=queued로 추가만, 수정 정책 없음"],
+          ["공유 링크 수정", "revoked_at 컬럼만, 폐기된 링크는 되살릴 수 없음"]
+        ] }
+      ]
+    },
+    "products/humscore/user/0001_humscore.sql": {
+      "summary": "개인형 nomad_humscore 스키마와 nomad_humscore_private를 만든다. 표 구성과 RPC는 조직형과 같고, 모든 표는 소유자 본인(user_id, 공유 링크는 owner_id)만 접근한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["scores", "악보(Score jsonb), 소프트 삭제, LWW 동기화"],
+          ["setlists", "찬양 콘티(items jsonb, 본인의 살아 있는 악보만 참조)"],
+          ["share_links", "읽기 전용 공유 링크(토큰 해시만 저장)"],
+          ["transcription_jobs", "변환 작업 큐(사용자는 queued 등록만)"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["get_shared_score · get_shared_setlist", "익명 포함 누구나 유효 토큰으로 열람"],
+          ["reissue_share_link(…)", "기존 활성 링크를 끄고 새 링크 발급"],
+          ["setlist_items_valid · 트리거 함수", "조직형과 같은 검사·한도·링크 자동 폐기"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [["본인 행만", "모든 표 RLS auth.uid() = 소유자"]] }
+      ]
+    },
+    "products/humscore/check_org.sql": {
+      "summary": "조직형 교차 접근 검사를 합성 데이터로 실행하고 롤백한다."
+    },
+    "products/humscore/check_user.sql": {
+      "summary": "개인형 교차 접근 검사를 합성 데이터로 실행하고 롤백한다."
+    }
+  }
+}

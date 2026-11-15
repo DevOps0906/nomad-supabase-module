@@ -1,0 +1,11 @@
+{
+  "categories": [
+    { "key": "media", "icon": "🎬", "name": "콘텐츠·영상 제작", "products": ["contentflow", "shorts", "sceneflow", "trailer", "toon"] },
+    { "key": "publish", "icon": "📰", "name": "출판·웹·커뮤니티", "products": ["news", "blog", "docs", "flora", "floria", "microweb", "poll"] },
+    { "key": "local", "icon": "🛒", "name": "커머스·동네 거래", "products": ["commerce", "jangter", "baedal"] },
+    { "key": "work", "icon": "🏢", "name": "업무·데이터", "products": ["erp", "knowflow", "analytics", "arch"] },
+    { "key": "edu", "icon": "🎓", "name": "교육·학습", "products": ["classroom", "school", "studynote"] },
+    { "key": "life", "icon": "🔮", "name": "개인·생활", "products": ["astro", "personal", "lottolab", "stock", "humscore"] },
+    { "key": "isolated", "icon": "🏥", "name": "의료(격리형)", "products": ["hospital"] }
+  ]
+}

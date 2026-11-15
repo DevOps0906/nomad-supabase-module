@@ -1,0 +1,69 @@
+{
+  "slug": "commerce",
+  "icon": "🛍️",
+  "tagline": "상품DB·AI 상세페이지·마켓 업로드",
+  "overview": "셀러 조직의 owner·admin(관리·삭제)·editor(콘텐츠 쓰기)·멤버(읽기)가 쓴다. 상품DB와 가져오기 배치, AI 상세페이지와 슬롯, 마켓 이미지·다계정 슬롯·등록 폼·업로드 이력, 내보내기 파일, 금지어 사전과 환율·카테고리 캐시를 담는다. 플랜 A(pro)·B(starter)·C(free)이고, 엑셀 내보내기·상세페이지 유형 확장·15슬롯·URL 벤치마킹·음성 기능은 A·B만이며 구독이 끊기면 C 기능만 남는다. 생성·업로드 결과 표는 서버만 쓰고, 마켓 업로드는 계정 자격·플랜·상세페이지 완료·compliance 판정(FAIL 거부, WARN 확인 필요)을 DB 트리거로 매번 검사한다. 결제 표는 두지 않는다(구독·크레딧팩만).",
+  "diagrams": [
+    {
+      "title": "상품에서 마켓 업로드까지",
+      "mermaid": "flowchart LR\n  Editor[editor 이상] --> PR[products]\n  Editor --> ST[shipping_templates]\n  Editor --> LD[\"listing_drafts(콘텐츠 컬럼)\"]\n  Server[서버 service_role] --> IB[import_batches]\n  IB --> PR\n  Server --> DP[detail_pages]\n  Server --> DPS[detail_page_slots]\n  Server --> MI[market_images]\n  Server --> MA[market_accounts]\n  Editor --> ACK[acknowledge_compliance_warning]\n  ACK --> DP\n  Server --> MU[market_uploads]\n  MU --> GATE{\"업로드 게이트(계정·플랜·상세페이지·compliance)\"}\n  Server --> EF[export_files]\n  Admin[owner·admin] --> BW[banned_words 조직 행]"
+    },
+    {
+      "title": "마켓 업로드 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> queued\n  queued --> validating\n  queued --> canceled\n  queued --> failed\n  validating --> uploading\n  validating --> failed\n  uploading --> submitted\n  uploading --> failed\n  submitted --> approved\n  submitted --> rejected\n  submitted --> failed\n  failed --> queued: 재시도\n  rejected --> queued: 재시도"
+    }
+  ],
+  "files": {
+    "products/commerce/org/0001_commerce.sql": {
+      "summary": "nomad_commerce·nomad_commerce_private 스키마와 commerce 제품·플랜(A/B/C)·12개 기능, 마켓 API 제공자 8개를 등록한다. 상품·상세페이지·마켓 업로드·내보내기 등 13개 표와 상태 전이·플랜 게이트·한도 트리거, WARN 확인 RPC, Realtime 구독, 제품 기본 금지어 사전을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["import_batches", "엑셀·아마존 가져오기 실행 단위(서버 쓰기)"],
+            ["products", "상품DB(외화 원가와 원화 정수 금액), 상품 수 한도 트리거·소프트 삭제"],
+            ["detail_pages", "AI 상세페이지와 compliance 판정, 서버 쓰기·사용자는 WARN 확인 RPC만"],
+            ["detail_page_slots", "상세페이지 슬롯별 생성 상태(서버 쓰기, Realtime)"],
+            ["market_images", "마켓별 변환 이미지(서버 쓰기)"],
+            ["market_accounts", "마켓 다계정 슬롯(서버 쓰기), 키는 nomad_core.provider_credentials(vault)에만"],
+            ["shipping_templates", "배송·반품 템플릿, 청약철회 7일 미만·자유 제한 사유는 CHECK로 거부"],
+            ["listing_drafts", "마켓 등록 폼, 사용자는 콘텐츠 컬럼만·상태와 완성도는 서버"],
+            ["market_uploads", "마켓 API 업로드 이력(서버 쓰기, 상태 전이·게이트 트리거, 멱등 키)"],
+            ["export_files", "엑셀(플레이오토 호환)·ZIP 내보내기(서버 쓰기)"],
+            ["banned_words", "금지어 사전, organization_id null은 제품 기본(읽기 전용)·조직 행은 owner/admin 편집"],
+            ["exchange_rates", "환율 캐시(서버 쓰기, 로그인 사용자 읽기)"],
+            ["market_categories", "마켓 카테고리 트리 캐시(서버 쓰기, 로그인 사용자 읽기)"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["acknowledge_compliance_warning(p_detail_page_id, p_note)", "사용자가 상세페이지 WARN 판정을 확인, 미완료는 CM008·WARN 아님은 CM009"],
+            ["내부 트리거", "상태 전이(CM001), 작성자·삭제 시각 고정, 코어 잡·원장 조직 일치(CM010), 잡 전달(mark_job_delivered), 상품 수(CM002)·마켓 슬롯(CM003) 한도, 상세페이지·업로드·내보내기 플랜 게이트(CM004~CM008), 업로드 대상 불변(CM011), WARN 확인 초기화, 기본 FAIL 금지어 하향 금지"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, 같은 조직 멤버+commerce 접근이면 읽기, 쓰기는 owner/admin/editor·삭제는 owner/admin"],
+            ["서버 전용 컬럼", "products의 금지어 결과·출처·배치 컬럼, listing_drafts의 상태·완성도는 서버만"],
+            ["anon 차단", "공개 RPC가 없어 anon에게 스키마 usage도 주지 않음"],
+            ["Realtime", "detail_pages·detail_page_slots·market_uploads·export_files·import_batches 상태"]
+          ]
+        }
+      ]
+    },
+    "products/commerce/org/0002_ai.sql": {
+      "summary": "core AI 계층 적용 후 commerce의 AI·음성 라우팅 기본값(상세페이지·compliance·어시스턴트·비전·채팅·위키·임베딩·STT·TTS)을 nomad_core.ai_routing_settings에 넣고 체인 제공자를 검사한다.",
+      "parts": [
+        {
+          "title": "기능·설정",
+          "items": [["AI 라우팅 기본값", "organization_id null 행으로 기능별 제공자 체인 시드, 제공자 행이 있을 때만 존재·종류·오픈소스 모드 확인"]]
+        }
+      ]
+    },
+    "products/commerce/check_org.sql": {
+      "summary": "합성 데이터로 조직 간 교차 접근, 역할별 권한, 상품 한도·소프트 삭제, 마켓 계정 자격, 상세페이지 잡 전달, 업로드 게이트, 구독 끊김 잠금, anon·core 직접 쓰기 0과 라우팅 시드를 검사하고 rollback한다."
+    }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "slug": "lottolab",
+  "icon": "🎱",
+  "tagline": "로또·연금복권 회차 데이터와 번호 생성",
+  "overview": "로또 6/45·연금복권 720+ 공식 회차 결과와 통계 캐시(공개 읽기), 사용자의 번호 생성 이력·저장 티켓·당첨 판정·사주 번호용 생년월일 프로필·가입 동의, 사전알림 신청을 담는다. 조직형(org)은 조직 멤버 읽기·owner/admin/editor 쓰기, 개인형(user)은 본인 행만 접근한다. 이 SQL은 플랜·기능 잠금 함수를 쓰지 않는다. 공식 데이터·수집 이력·당첨 판정·사전알림은 service_role만 쓰고, 번호·티켓 형식은 CHECK 함수로 검증한다. 앱 전용 표(푸시 기기·스토어 구독 계정)는 별도 파일로 두며 사람(user_id)에 묶는다.",
+  "diagrams": [
+    {
+      "title": "주요 흐름",
+      "mermaid": "flowchart LR\n  AN[익명·로그인 사용자] -->|공개 읽기| DL[draws_lotto]\n  AN -->|공개 읽기| DP[draws_pension]\n  AN -->|공개 읽기| ST[statistics_cache]\n  SRV[\"서버 service_role\"] --> IR[ingestion_runs]\n  SRV --> DL\n  SRV --> DP\n  SRV --> ST\n  SRV --> WR[waitlist_rate_hit]\n  SRV --> WQ[waitlist_request_confirm]\n  SRV --> WC[waitlist_confirm]\n  WQ --> WS[waitlist_signups]\n  WC --> WS\n  US[\"사용자 또는 조직 편집자\"] --> GP[generator_profiles]\n  US --> GB[generated_batches]\n  GB --> GN[generated_numbers]\n  US --> TK[saved_tickets]\n  TK -->|source_number_id| GN\n  SRV -->|당첨 판정 기록| DC[draw_checks]\n  DC --> TK\n  US --> FP[fortune_profiles]\n  US --> UC[user_consents]"
+    },
+    {
+      "title": "저장 티켓 상태",
+      "mermaid": "stateDiagram-v2\n  [*] --> favorite\n  [*] --> purchased\n  favorite --> purchased: 구매 기록\n  purchased --> favorite: 거부 PT422"
+    }
+  ],
+  "files": {
+    "products/lottolab/org/0001_lottolab.sql": {
+      "summary": "조직형 nomad_lottolab·nomad_lottolab_private 스키마와 game_type(lotto·pension)을 만든다. 공개 추첨 데이터는 anon 읽기, 사용자 데이터는 organization_id 소유로 조직 멤버 읽기·owner/admin/editor 쓰기다. pg_cron이 있으면 사전알림·레이트리밋 정리 작업을 등록한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["ingestion_runs", "공식 회차 수집 이력(verified·needs_review·approved·rejected), service_role만"],
+          ["draws_lotto", "로또 6/45 회차 결과, 공개 읽기"],
+          ["draws_pension", "연금복권 720+ 회차 결과(6자리 문자열), 공개 읽기"],
+          ["statistics_cache", "통계 집계 캐시, 공개 읽기·재계산은 service_role"],
+          ["waitlist_signups", "사전알림 신청(이메일 이중 확인, 마케팅·연령 동의 필수), service_role만"],
+          ["nomad_lottolab_private.rate_limits", "고정 창 레이트리밋 카운터(원문 IP 저장 안 함)"],
+          ["generator_profiles", "번호 생성 조건 프리셋"],
+          ["generated_batches", "번호 생성 배치(random·condition·zodiac·birthday·dream·saju, 추가 전용)"],
+          ["generated_numbers", "배치의 번호 줄(최대 50줄, 형식 검증, 추가 전용)"],
+          ["saved_tickets", "즐겨찾기·구매 티켓(favorite·purchased, 멱등 키, 당첨금 정수)"],
+          ["draw_checks", "티켓 당첨 판정 이력, 쓰기는 service_role"],
+          ["fortune_profiles", "사주 번호용 생년월일(양력·음력·윤달·시진), 조직당 1행"],
+          ["user_consents", "가입 동의(약관·개인정보 버전·만 19세), 본인만 읽기·추가"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["waitlist_rate_hit(key, window_sec, max)", "사전알림 레이트리밋 1회 기록 후 허용 여부(service_role)"],
+          ["waitlist_request_confirm(email, token_hash, ttl, max_sends, window)", "확인 토큰 발급·재발송 횟수 제한(service_role)"],
+          ["waitlist_confirm(token_hash)", "토큰 해시로 이메일 확인 확정(service_role)"],
+          ["valid_numbers · valid_ticket", "번호·티켓 형식 검사(CHECK용, private)"],
+          ["트리거 함수", "구매→즐겨찾기 역전환 거부(PT422)·같은 조직 생성 번호만 참조·updated_at 갱신"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "사용자 표는 organization_role 기반 RLS, 쓰기는 owner·admin·editor"],
+          ["추가 전용", "generated_batches·generated_numbers는 UPDATE 권한 없음"],
+          ["보관 기간", "사전알림 6개월 후 삭제, 미확인 만료 행·하루 지난 레이트리밋 정리(pg_cron 있을 때)"]
+        ] }
+      ]
+    },
+    "products/lottolab/user/0001_lottolab.sql": {
+      "summary": "개인형 nomad_lottolab 스키마를 만든다. 공개 추첨 데이터·사전알림·검증 함수는 조직형과 같고, 사용자 표는 user_id 소유로 본인 행만 접근한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["ingestion_runs · draws_lotto · draws_pension · statistics_cache", "조직형과 같은 공개·수집 데이터"],
+          ["waitlist_signups · private.rate_limits", "사전알림 신청과 레이트리밋 카운터, service_role만"],
+          ["generator_profiles", "번호 생성 조건 프리셋, 본인 CRUD"],
+          ["generated_batches · generated_numbers", "번호 생성 이력(추가 전용), 본인 읽기·추가·삭제"],
+          ["saved_tickets", "즐겨찾기·구매 티켓, UPDATE는 구매 상태 열만"],
+          ["draw_checks", "당첨 판정 이력, 본인 티켓 읽기만"],
+          ["fortune_profiles", "사주 번호용 생년월일, 1인 1행 본인만"],
+          ["user_consents", "가입 동의 기록, 본인 읽기·추가만"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["waitlist_rate_hit · waitlist_request_confirm · waitlist_confirm", "사전알림 신청·확인(service_role)"],
+          ["valid_numbers · valid_ticket · 트리거 함수", "조직형과 같은 형식 검사·역전환 거부·출처 검사"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [["본인 행만", "사용자 표 RLS auth.uid() = user_id"]] }
+      ]
+    },
+    "products/lottolab/app/0001_app_tables.sql": {
+      "summary": "앱 전용 표 push_devices·subscription_accounts를 더한다. 조직형·개인형 모두 user_id 소유이며 user/ 또는 org/ 0001 뒤에 적용한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["push_devices", "푸시 기기 토큰(android·ios·windows, 알림 동의), 본인 CRUD·service_role 읽기"],
+          ["subscription_accounts", "스토어 구독 계정, 본인 읽기·쓰기는 service_role(state 값은 미확정)"]
+        ] }
+      ]
+    },
+    "products/lottolab/check_org.sql": {
+      "summary": "조직형 접근 검사를 합성 데이터로 실행하고 롤백한다(run_check.sh org가 org/0001 + app/0001 적용 후 실행)."
+    },
+    "products/lottolab/check_user.sql": {
+      "summary": "개인형 접근 검사를 합성 데이터로 실행하고 롤백한다(run_check.sh user가 user/0001 + app/0001 적용 후 실행)."
+    }
+  }
+}

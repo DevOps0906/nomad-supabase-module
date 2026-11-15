@@ -1,0 +1,81 @@
+{
+  "slug": "microweb",
+  "icon": "💌",
+  "tagline": "모바일 청첩장 같은 마이크로웹 제작·게시",
+  "overview": "모바일 청첩장 같은 한 페이지 마이크로웹을 템플릿으로 만들고 게시하며, 하객 방명록·참석 응답·견적 문의·대행 제작 주문을 다루는 조직형 DB다. 조직 멤버가 편집하고(owner·admin·editor), 상태 전이 일부와 개인정보 삭제는 owner·admin, 참석·견적·주문 고객명 같은 개인정보는 viewer에게 보이지 않는다. 스튜디오는 기능 studio(A·B) + 초대제 허용 목록(studio_access)이 있어야 열리고, 구독이 끊겨도 이미 게시된 사이트 열람은 유지되지만 방명록·RSVP 쓰기는 닫힌다. 방문자(anon)는 표를 직접 읽지 못하고 공개 읽기 RPC 4개만 쓰며, 하객 쓰기는 서버가 IP 해시를 계산해 service_role RPC로 넣는다.",
+  "diagrams": [
+    {
+      "title": "제작·게시와 하객 흐름",
+      "mermaid": "flowchart LR\n  U[멤버] --> CS[create_site]\n  U --> TS[transition_site]\n  U --> CO[create_order]\n  CS --> S[(sites)]\n  TS --> S\n  CO --> PO[(production_orders)]\n  SV[서버 service_role] --> RP[request_publish]\n  W[워커] --> FP[finalize_publish]\n  W --> FL[fail_publish]\n  RP --> S\n  FP --> PUB[(site_publications)]\n  FL --> S\n  V[방문자 anon] --> GPS[get_public_site]\n  V --> LPG[list_public_guestbook]\n  GPS --> PUB\n  SV --> SGE[submit_guestbook_entry]\n  SV --> SRS[submit_rsvp]\n  SV --> CL[create_lead]\n  SGE --> GB[(guestbook_entries)]\n  SRS --> RS[(rsvp_responses)]\n  CL --> LD[(leads)]\n  LPG --> GB\n  CRON[크론] --> EX[expire_sites]\n  EX --> S"
+    },
+    {
+      "title": "사이트 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> draft\n  draft --> review\n  draft --> publishing\n  draft --> archived\n  review --> draft\n  review --> publishing\n  review --> archived\n  publishing --> published\n  publishing --> draft\n  publishing --> unpublished\n  publishing --> expired\n  published --> publishing\n  published --> unpublished\n  published --> expired\n  unpublished --> publishing\n  unpublished --> expired\n  unpublished --> archived\n  expired --> publishing\n  expired --> archived"
+    }
+  ],
+  "files": {
+    "products/microweb/org/0001_microweb.sql": {
+      "summary": "nomad_microweb 스키마와 10개 표·상태 전이 트리거·RLS·사용자/서버/공개 RPC를 만들고, 템플릿 카탈로그 12개를 시드한다. 제품 microweb과 A·B·C 플랜, 기능 11개를 등록한다(가격·셀프 발행 크레딧 수치는 넣지 않음).",
+      "parts": [
+        { "title": "플랜·기능", "items": [
+          ["A·B", "studio 포함 기능 11개 전부"],
+          ["C", "studio를 뺀 세부 기능만, 세부 기능은 항상 studio와 함께 검사하므로 C 단독으로는 열리지 않음"],
+          ["기능", "studio·guestbook·rsvp·ai_greeting·bgm_upload·custom_slug·ai_copy·ai_chat·voice_chat·voice_greeting·guestbook_voice"]
+        ] },
+        { "title": "표", "items": [
+          ["templates", "템플릿 카탈로그(전역), 방문자는 list_public_templates RPC로만"],
+          ["portfolio_items", "쇼룸 포트폴리오(전역), 방문자는 list_public_portfolio RPC로만"],
+          ["studio_access", "초대제 베타 허용 목록(조직당 1행, 활성 사이트 상한)"],
+          ["sites", "마이크로웹 편집본, 사용자는 콘텐츠 컬럼만 직접 수정하고 상태·게시·동의·과금은 RPC 전용"],
+          ["site_publications", "공개 스냅샷, 쓰기는 게시·전이·만료 함수와 service_role만"],
+          ["site_assets", "사이트 자산 메타, 추가·삭제는 서버(Storage와 함께), 사용자는 캡션·순서만"],
+          ["guestbook_entries", "하객 방명록, 멤버는 ip_hash·voice_job_id 제외 컬럼만 읽기"],
+          ["rsvp_responses", "하객 참석 응답(개인정보, 추가 전용), owner/admin/editor만 읽기"],
+          ["leads", "견적 문의(개인정보), 쓰기는 RPC, owner/admin/editor만 읽기"],
+          ["production_orders", "대행 제작 주문(금액 정수, 멱등 키), 결제 민감정보 저장 금지"]
+        ] },
+        { "title": "함수(RPC) — 사용자", "items": [
+          ["create_site(…)", "템플릿(beta/released)으로 사이트 생성, 활성 사이트 상한, 기본 만료 = 예식 + 90일"],
+          ["transition_site(p_site_id, p_to, p_reason)", "draft↔review는 편집자, unpublished·archived는 owner/admin, 게시·만료는 불가"],
+          ["issue_preview_token(p_site_id, p_ttl_hours)", "고객 시안 확인 토큰, 원문은 한 번만 반환하고 sha256만 저장"],
+          ["confirm_disclosure_consent(p_site_id, p_basis)", "계좌번호·연락처 공개 동의 기록(게시 전 필수)"],
+          ["moderate_guestbook_entry · set_lead_status", "방명록 숨김·견적 상태 변경, 반환은 공개 컬럼만"],
+          ["delete_lead(p_lead_id)", "개인정보 삭제 요청(owner/admin), 구독이 끊겨도 처리"],
+          ["studio_access_detail(p_organization_id)", "허용 목록 상세(note·granted_by), owner/admin만"],
+          ["create_order · transition_order · attach_order_site", "제작 주문 생성(멱등)·상태 전이(재시도 멱등)·사이트 연결"]
+        ] },
+        { "title": "함수(RPC) — 서버·공개", "items": [
+          ["request_publish(p_site_id, p_actor_id, p_ledger_id)", "게시 요청, 대행 모드는 결제된 주문 + 고객 확인, 셀프 모드는 이 사이트용 consume 원장 필요"],
+          ["finalize_publish · fail_publish", "워커가 스냅샷을 만들고 published로, 실패면 상태만 되돌림(환불은 nomad_core.fail_job)"],
+          ["record_customer_approval(p_token_hash, p_name)", "공개 시안 확인 라우트가 토큰 해시로 호출"],
+          ["submit_guestbook_entry · submit_rsvp · create_lead", "하객·방문자 쓰기, 예외 대신 ok·closed·invalid·spam·rate_limited 결과 코드"],
+          ["attach_guestbook_voice(p_entry_id, p_voice_job_id)", "하객 음성 방명록 연결(같은 조직·STT 성공·하객 고지 작업만)"],
+          ["expire_sites() · purge_expired_data()", "만료 처리(매 10분)·보존 기간 지난 하객·견적 데이터 삭제(매일)"],
+          ["list_public_templates · list_public_portfolio · get_public_site · list_public_guestbook", "anon 공개 읽기 RPC 4개"],
+          ["내부 판정·트리거", "has_studio_access·org_studio_open·is_site_live·require_org_role 등, 사이트·견적·주문 상태 전이와 편집 잠금·스냅샷 동기화 트리거"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 스튜디오 접근 = 멤버 + studio + 허용 목록"],
+          ["anon", "표 권한 0, 공개 읽기 RPC 4개만"],
+          ["개인정보", "참석·견적·주문 고객명은 viewer 제외, ip_hash는 어떤 사용자에게도 안 보임"],
+          ["게시 열람", "구독이 끊겨도 게시 중 사이트는 열람 유지, 조직 비활성이면 not_found"],
+          ["편집 잠금", "publishing·archived 상태는 편집 불가, 슬러그는 첫 게시 뒤 변경 불가"]
+        ] }
+      ]
+    },
+    "products/microweb/org/0002_ai.sql": {
+      "summary": "microweb AI·음성 라우팅 기본값을 nomad_core.ai_routing_settings에 넣는다. 하객 음성 방명록 STT(microweb_guestbook_voice)는 하객이 국외 이전에 동의한 적이 없으므로 오픈소스 강제다.",
+      "parts": [
+        { "title": "라우팅 기본값", "items": [
+          ["microweb_copy·chat", "LLM, anthropic 우선"],
+          ["microweb_greeting·wiki.*", "LLM, oss-llm 우선"],
+          ["dify.aux·microweb_knowledge", "오픈소스 고정"],
+          ["voice_chat·microweb_voice_greeting·microweb_guestbook_voice", "STT/TTS, 하객 음성은 오픈소스 강제"]
+        ] }
+      ]
+    },
+    "products/microweb/check_org.sql": {
+      "summary": "조직 2곳 교차 접근 거부·역할별 권한·anon 표 접근 0·공개 RPC·게시 흐름(대행·셀프 크레딧)·하객 쓰기·음성 연결·구독 끊김 잠금·만료·권한을 합성 데이터로 확인하고 rollback."
+    }
+  }
+}

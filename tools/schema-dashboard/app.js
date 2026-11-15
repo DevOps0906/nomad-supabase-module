@@ -5,7 +5,7 @@ const OWNERS = { user: "user", org: "org", public: "공개", server: "서버", i
 const CLIENTS = { web: "웹", app: "앱", desktop: "데스크톱", worker: "워커" };
 const THEME_KEY = "nomad.theme";
 
-const state = { data: null, filters: { schema: "", owner: "", noRls: false, client: "" }, q: "" };
+const state = { data: null, filters: { schema: "", owner: "", noRls: false, client: "" }, q: "", navQ: "", navOpen: new Map() }; // navOpen: 분류 key → 사용자가 정한 펼침(true/false)
 const $main = document.getElementById("main");
 const $nav = document.getElementById("nav");
 
@@ -100,16 +100,130 @@ function sqlCards(groups) {
       .then((t) => { item.sql = t; if (dlg.open && trigger === btn) show(t); })
       .catch((err) => { if (dlg.open && trigger === btn) dlg.querySelector('[role="status"]').textContent = "불러오지 못했습니다 (" + err.message + ")"; });
   };
-  const card = (item, mono) => h("li", {}, h("button", { type: "button", class: "sqlcard", "aria-haspopup": "dialog", onclick: (e) => open(item, e.currentTarget) },
-    h("span", { class: "sqlcard__title" + (mono ? " mono" : "") }, item.title),
+  // 카드 = 제목·경로·설명(content의 summary, 없으면 첫 주석)·구성(parts, 접이식)·통계 + "SQL 보기" 버튼
+  const card = (item, mono) => h("li", {}, h("article", { class: "sqlcard" },
+    h("h4", { class: "sqlcard__title" + (mono ? " mono" : "") }, item.title),
     item.sub ? h("span", { class: "sqlcard__sub muted" }, item.sub) : null,
-    item.desc ? h("span", { class: "sqlcard__desc" }, item.desc) : null,
-    h("span", { class: "sqlcard__meta" }, item.badges ? item.badges.map((b) => badge(b)) : [badge(item.sql.split("\n").length + "줄"), sqlStats(item.sql).map(([l, n]) => badge(l + " " + n))])));
+    item.doc && item.doc.summary ? h("p", { class: "sqlcard__summary" }, item.doc.summary) : item.desc ? h("span", { class: "sqlcard__desc" }, item.desc) : null,
+    item.doc ? docParts(item.doc.parts) : null,
+    h("span", { class: "sqlcard__meta" }, item.badges ? item.badges.map((b) => badge(b)) : [badge(item.sql.split("\n").length + "줄"), sqlStats(item.sql).map(([l, n]) => badge(l + " " + n))]),
+    h("button", { type: "button", class: "btn sqlcard__open", "aria-haspopup": "dialog", "aria-label": item.title + " SQL 보기", onclick: (e) => open(item, e.currentTarget) }, "SQL 보기")));
   return h("div", { class: "sqlcards" },
     groups.map((g) => g.items.length ? h("section", { class: "sqlcards__group" },
       h("h3", {}, g.name, h("span", { class: "count muted" }, g.items.length)),
       h("ul", { class: "sqlcards__grid", "aria-label": g.name }, g.items.map((it) => card(it, g.mono)))) : null),
     dlg);
+}
+
+// content 설명의 parts: [{title, items:[[이름, 설명]]}] → 접이식 목록(카드 높이를 낮게 유지)
+function docParts(parts) {
+  if (!Array.isArray(parts) || !parts.length) return null;
+  return h("div", { class: "parts" }, parts.map((pt, i) => {
+    const items = Array.isArray(pt.items) ? pt.items : [];
+    return h("details", { class: "parts__group", open: i === 0 },
+      h("summary", {}, pt.title || "구성", h("span", { class: "count muted" }, items.length)),
+      h("ul", { class: "parts__list" }, items.map((it) => {
+        const [name, desc] = Array.isArray(it) ? it : [String(it), ""];
+        return h("li", {}, h("code", {}, name), desc ? [" — ", desc] : null);
+      })));
+  }));
+}
+
+/* ---------- 구조도(Mermaid, 고정 버전 CDN · securityLevel strict · 실패 시 원문) ---------- */
+const MERMAID_SRC = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js";
+const MERMAID_SRI = "sha384-rbtjAdnIQE/aQJGEgXrVUlMibdfTSa4PQju4HDhN3sR2PmaKFzhEafuePsl9H/9I";
+let mermaidP = null, mmdSeq = 0, mmdChain = Promise.resolve(), mmdTheme = null;
+const svgCache = new Map(); // 테마+원문 → svg 문자열(탭 이동 때 다시 그리지 않음)
+function loadMermaid() {
+  if (!mermaidP) mermaidP = new Promise((resolve, reject) => {
+    const s = h("script", { src: MERMAID_SRC, integrity: MERMAID_SRI, crossorigin: "anonymous", referrerpolicy: "no-referrer" });
+    s.addEventListener("load", () => (window.mermaid ? resolve(window.mermaid) : reject(new Error("mermaid 전역 없음"))));
+    s.addEventListener("error", () => { mermaidP = null; s.remove(); reject(new Error("Mermaid 스크립트를 불러오지 못했습니다")); });
+    document.head.append(s);
+  });
+  return mermaidP;
+}
+const isDark = () => { const t = document.documentElement.getAttribute("data-theme"); return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+function mmdFallback(box, err) {
+  box.replaceChildren(h("p", { class: "muted diagram__err", role: "note" }, "구조도를 그리지 못해 원문을 표시합니다 (" + err.message + ")"),
+    h("pre", { class: "diagram__src" }, h("code", {}, box._mmd)));
+}
+function drawMermaid(box) {
+  box.replaceChildren(h("p", { class: "muted" }, "구조도 그리는 중…"));
+  mmdChain = mmdChain.then(async () => {
+    if (!box.isConnected) return;
+    const theme = isDark() ? "dark" : "default";
+    const key = theme + "\n" + box._mmd;
+    // mermaid 출력은 securityLevel strict(DOMPurify 정화)를 거친 SVG만 넣는다 — 이 화면에서 유일한 innerHTML
+    if (svgCache.has(key)) { box.innerHTML = svgCache.get(key); return; }
+    const id = "mmd-" + (++mmdSeq);
+    try {
+      const m = await loadMermaid();
+      if (mmdTheme !== theme) { m.initialize({ startOnLoad: false, securityLevel: "strict", theme, fontFamily: getComputedStyle(document.body).fontFamily }); mmdTheme = theme; }
+      const { svg } = await m.render(id, box._mmd);
+      svgCache.set(key, svg);
+      if (box.isConnected) box.innerHTML = svg;
+    } catch (err) {
+      document.querySelectorAll("#d" + id + ", #" + id).forEach((el) => { if (!box.contains(el)) el.remove(); }); // 실패 시 mermaid가 body에 남기는 임시 요소
+      if (box.isConnected) mmdFallback(box, err);
+    }
+  });
+}
+function redrawDiagrams() { document.querySelectorAll(".diagram__box").forEach(drawMermaid); }
+function diagramBox(title, src) {
+  const box = h("div", { class: "diagram__box", tabindex: "0", role: "region", "aria-label": title + " 구조도" });
+  box._mmd = src;
+  queueMicrotask(() => drawMermaid(box)); // render()가 화면에 붙인 뒤 그린다
+  return box;
+}
+// 표 관계 ERD: 표·FK로 erDiagram(컬럼은 PK/FK만). 바깥 스키마 표(nomad_core·auth 등)는 참조된 컬럼만 가진 엔터티로
+const mmdId = (s) => String(s).replace(/[^A-Za-z0-9_]/g, "_");
+function erdSource(tables) {
+  if (!tables.length) return null;
+  const nameCount = {};
+  tables.forEach((t) => { nameCount[t.name] = (nameCount[t.name] || 0) + 1; });
+  const own = new Map(tables.map((t) => [t.schema + "." + t.name, mmdId(nameCount[t.name] > 1 ? t.schema + "_" + t.name : t.name)]));
+  const ext = new Map(); // id → Set(컬럼)
+  const lines = ["erDiagram"], rels = [];
+  for (const t of tables) {
+    const me = own.get(t.schema + "." + t.name);
+    const cols = (t.columns || []).filter((c) => c.pk || c.fk);
+    lines.push("  " + me + (cols.length ? " {" : ""));
+    for (const c of cols) {
+      const typ = mmdId(String(c.type || "col").split(/[\s(]/)[0]) || "col";
+      lines.push("    " + (/^[A-Za-z]/.test(typ) ? typ : "t" + typ) + " " + mmdId(c.name) + " " + (c.pk && c.fk ? "PK, FK" : c.pk ? "PK" : "FK"));
+      if (!c.fk) continue;
+      const parts = c.fk.split(".");
+      const col = parts.pop(), target = parts.join(".");
+      let pid = own.get(target);
+      if (!pid) { pid = mmdId(target); if (!ext.has(pid)) ext.set(pid, new Set()); ext.get(pid).add(mmdId(col)); }
+      rels.push("  " + pid + " ||--o{ " + me + ' : "' + mmdId(c.name) + '"');
+    }
+    if (cols.length) lines.push("  }");
+  }
+  for (const [id, cols] of ext) lines.push("  " + id + " {", ...[...cols].map((c) => "    ref " + c + " PK"), "  }");
+  return lines.concat(rels).join("\n");
+}
+// 구조도 섹션: content의 diagrams + 자동 ERD. erd = {title, tables}
+function diagramSection(doc, erd) {
+  const list = ((doc && Array.isArray(doc.diagrams)) ? doc.diagrams : []).filter((d) => d && d.mermaid).map((d) => ({ title: d.title || "구조도", src: d.mermaid }));
+  const erdSrc = erd ? erdSource(erd.tables) : null;
+  if (erdSrc) list.push({ title: erd.title, src: erdSrc, note: "컬럼은 PK/FK만 · 바깥 스키마 표는 참조된 컬럼만" });
+  if (!list.length) return null;
+  return h("section", { class: "diagrams", "aria-label": "구조도" },
+    h("h3", { class: "diagrams__title" }, "구조도"),
+    list.map((d) => h("figure", { class: "diagram" },
+      h("figcaption", {}, d.title, d.note ? h("small", { class: "muted" }, d.note) : null),
+      diagramBox(d.title, d.src))));
+}
+// 화면 머리: 아이콘·이름·배지·tagline·메타 + overview
+function docHead(doc, title, extra, meta) {
+  doc = doc || {};
+  return [h("div", { class: "page-head" },
+    h("h2", {}, doc.icon ? h("span", { class: "page-head__icon", "aria-hidden": "true" }, doc.icon) : null, title), extra,
+    doc.tagline ? h("p", { class: "page-head__tagline" }, doc.tagline) : null,
+    h("p", {}, meta)),
+  doc.overview ? h("p", { class: "overview" }, doc.overview) : null];
 }
 
 /* ---------- 테마 ---------- */
@@ -119,28 +233,105 @@ function applyTheme(t) {
   if (t === "light" || t === "dark") root.setAttribute("data-theme", t); else root.removeAttribute("data-theme");
   try { if (t === "system") localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, t); } catch (e) { /* 저장 불가여도 즉시 적용은 유지 */ }
   document.querySelectorAll("[data-theme-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)));
+  redrawDiagrams();
 }
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!document.documentElement.hasAttribute("data-theme")) redrawDiagrams(); });
 document.querySelectorAll("[data-theme-set]").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.themeSet)));
 // 초기 표시: theme-init.js가 이미 적용한 상태를 버튼에 반영만 한다(?theme=는 저장하지 않는 임시 지정)
 const shown = document.documentElement.getAttribute("data-theme") || "system";
 document.querySelectorAll("[data-theme-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeSet === shown)));
 
-/* ---------- 라우팅: #core · #product/<slug>/<tab> · #compare ---------- */
+/* ---------- 라우팅: #core · #category/<key> · #product/<slug>/<tab> · #compare (앞의 "/"는 무시: #/category/media) ---------- */
 function route() {
-  const p = (location.hash || "#core").slice(1).split("/");
+  const p = (location.hash || "#core").slice(1).replace(/^\/+/, "").split("/");
   return { type: p[0] || "core", slug: p[1], tab: p[2] || "existing" };
 }
 function go(hash) { location.hash = hash; }
 
+// 내비 뼈대는 한 번만 만든다(검색 입력 포커스 유지). 모바일(~767)은 "메뉴" 버튼으로 접고 편다
+const $navCurrent = h("span", { class: "nav__current muted" });
+const $navToggle = h("button", { type: "button", class: "nav__toggle", "aria-expanded": "false", "aria-controls": "nav-body" }, "메뉴", $navCurrent);
+const $navQ = h("input", { type: "search", placeholder: "제품 검색", autocomplete: "off" });
+const $navList = h("div", { class: "nav__list" });
+$nav.append($navToggle, h("div", { class: "nav__body", id: "nav-body" }, h("label", { class: "nav__search" }, h("span", { class: "sr-only" }, "제품 검색"), $navQ), $navList));
+const setNavOpen = (on) => { $nav.classList.toggle("is-open", on); $navToggle.setAttribute("aria-expanded", String(on)); };
+$navToggle.addEventListener("click", () => setNavOpen(!$nav.classList.contains("is-open")));
+$navQ.addEventListener("input", () => { state.navQ = $navQ.value.trim().toLowerCase(); if (state.data) renderNav(route()); });
+
+function navCategories() {
+  const bySlug = new Map(state.data.products.map((p) => [p.slug, p]));
+  const used = new Set();
+  const cats = (state.data.categories || []).map((c) => {
+    const products = (c.products || []).map((s) => bySlug.get(s)).filter((p) => p && !used.has(p.slug));
+    products.forEach((p) => used.add(p.slug));
+    return { key: c.key, icon: c.icon, name: c.name, products };
+  });
+  const rest = state.data.products.filter((p) => !used.has(p.slug));
+  if (rest.length) cats.push({ key: "_etc", icon: "📦", name: cats.length ? "기타" : "제품", products: rest });
+  return cats.filter((c) => c.products.length);
+}
 function renderNav(r) {
-  $nav.replaceChildren();
-  const item = (label, hash, on) => $nav.append(h("button", { type: "button", "aria-current": on ? "page" : false, onclick: () => go(hash) }, label));
-  $nav.append(h("span", { class: "nav__label" }, "공용 모듈"));
-  item("nomad_core", "#core", r.type === "core");
-  $nav.append(h("span", { class: "nav__label" }, "제품"));
-  for (const p of state.data.products) item(p.name, "#product/" + p.slug + "/existing", r.type === "product" && r.slug === p.slug);
-  $nav.append(h("span", { class: "nav__label" }, "비교"));
-  item("제품 × 구조", "#compare", r.type === "compare");
+  const q = state.navQ;
+  const item = (icon, label, sub, hash, on) => h("button", { type: "button", class: "nav__item", "aria-current": on ? "page" : false, onclick: () => { setNavOpen(false); go(hash); } },
+    h("span", { class: "nav__icon", "aria-hidden": "true" }, icon || "•"),
+    h("span", { class: "nav__text" }, label, sub ? h("small", {}, sub) : null));
+  const doc = (p) => p.doc || {};
+  const hit = (p) => !q || [p.name, p.slug, doc(p).tagline].join(" ").toLowerCase().includes(q);
+  const cur = r.type === "product" ? state.data.products.find((p) => p.slug === r.slug) : null;
+  const cats = navCategories();
+  const curCat = r.type === "category" ? cats.find((c) => c.key === r.slug) : null;
+  $navCurrent.textContent = cur ? cur.name : curCat ? curCat.name : r.type === "compare" ? "제품 × 구조" : "nomad_core";
+  // 분류 그룹: 이름 버튼 = 분류 화면으로 이동 + 펼침, 화살표 버튼 = 접기·펴기만. 기본 펼침 = 검색 중 · 현재 제품/분류
+  const groups = cats.map((c, i) => {
+    const ps = c.products.filter(hit);
+    if (!ps.length) return null;
+    const auto = Boolean(q) || ps.includes(cur) || c === curCat;
+    const open = state.navOpen.has(c.key) ? state.navOpen.get(c.key) : auto;
+    const bodyId = "nav-group-" + i;
+    const body = h("div", { class: "nav__groupbody", id: bodyId, hidden: !open }, ps.map((p) => item(doc(p).icon, p.name, doc(p).tagline, "#product/" + p.slug + "/existing", p === cur)));
+    const arrow = h("button", { type: "button", class: "nav__arrow", "aria-expanded": String(open), "aria-controls": bodyId, "aria-label": c.name + " 접기·펴기" });
+    arrow.addEventListener("click", () => {
+      const on = body.hidden;
+      body.hidden = !on; arrow.setAttribute("aria-expanded", String(on)); state.navOpen.set(c.key, on);
+    });
+    return h("div", { class: "nav__group" },
+      h("div", { class: "nav__grouphead" },
+        h("button", { type: "button", class: "nav__groupbtn", "aria-current": c === curCat ? "page" : false,
+          onclick: () => { state.navOpen.set(c.key, true); setNavOpen(false); go("#category/" + c.key); } },
+          h("span", { class: "nav__icon", "aria-hidden": "true" }, c.icon || "•"), h("span", { class: "nav__groupname" }, c.name), h("span", { class: "count muted" }, ps.length)),
+        arrow),
+      body);
+  }).filter(Boolean);
+  $navList.replaceChildren(
+    h("span", { class: "nav__label" }, "공용 모듈"),
+    item((state.data.core.doc || {}).icon || "🧩", "nomad_core", (state.data.core.doc || {}).tagline, "#core", r.type === "core"),
+    h("span", { class: "nav__label" }, "제품"),
+    ...(groups.length ? groups : [h("p", { class: "muted nav__empty" }, "맞는 제품이 없습니다.")]),
+    h("span", { class: "nav__label" }, "비교"),
+    item("📊", "제품 × 구조", null, "#compare", r.type === "compare"));
+}
+
+/* ---------- 분류 화면: 제품 카드 격자(아이콘·이름·tagline·형태·표 수), 누르면 제품 화면 ---------- */
+const FORM_LABEL = { user: "user형", org: "org형", isolated: "격리형" };
+const FORM_VARIANT = { user: "single", org: "tenant", isolated: "isolated" }; // 표 수는 제품 형태의 대표 구조로
+function viewCategory(r) {
+  const c = navCategories().find((x) => x.key === r.slug);
+  state.redraw = () => {};
+  if (!c) return h("div", { class: "notice" }, "알 수 없는 분류: " + r.slug);
+  const vname = Object.fromEntries(VARIANTS);
+  const card = (p) => {
+    const doc = p.doc || {};
+    const vk = (p.variants[FORM_VARIANT[p.form]] || { tables: [] }).tables.length ? FORM_VARIANT[p.form] : "existing";
+    const n = (p.variants[vk] || { tables: [] }).tables.length;
+    return h("li", {}, h("button", { type: "button", class: "prodcard", onclick: () => go("#product/" + p.slug + "/existing") },
+      h("span", { class: "prodcard__head" }, h("span", { class: "prodcard__icon", "aria-hidden": "true" }, doc.icon || "•"), h("span", { class: "prodcard__name" }, p.name)),
+      doc.tagline ? h("span", { class: "prodcard__tagline" }, doc.tagline) : null,
+      h("span", { class: "prodcard__meta" }, badge(FORM_LABEL[p.form] || p.form, "accent"), badge("표 " + n + " · " + vname[vk]))));
+  };
+  return [h("div", { class: "page-head" },
+      h("h2", {}, h("span", { class: "page-head__icon", "aria-hidden": "true" }, c.icon || "•"), c.name), badge("제품 " + c.products.length + "개"),
+      h("p", {}, "분류 · 카드를 누르면 그 제품 화면으로 이동")),
+    h("ul", { class: "prodcards", "aria-label": c.name + " 제품" }, c.products.map(card))];
 }
 
 /* ---------- 필터·검색 ---------- */
@@ -232,13 +423,16 @@ function viewCore(r) {
   const tabs = h("div", { class: "tabs", role: "group", "aria-label": "보기" },
     h("button", { type: "button", "aria-pressed": String(!isSql), onclick: () => go("#core") }, "영역", h("span", { class: "count muted" }, areas.length)),
     files.length ? h("button", { type: "button", "aria-pressed": String(isSql), onclick: () => go("#core/sql") }, "SQL 카드", h("span", { class: "count muted" }, files.length)) : null);
-  const head = h("div", { class: "page-head" }, h("h2", {}, "공용 모듈 nomad_core"), h("p", {}, "영역별 카드 · 테이블 " + all.length + "개 · migrations " + files.length + "개"));
+  const doc = state.data.core.doc || {};
+  const docFiles = doc.files || {};
+  const head = [docHead(doc, "공용 모듈 nomad_core", null, "영역별 카드 · 테이블 " + all.length + "개 · migrations " + files.length + "개"),
+    diagramSection(doc, { title: "표 관계 ERD · nomad_core · 표 " + all.length, tables: all })];
   if (isSql) {
     state.redraw = () => {};
     // 전체: 파일명 순(=적용 순서)으로 이어 붙인 원문
     const joined = files.map((f) => "-- ===== " + baseName(f.path) + " =====\n" + f.sql.replace(/\s+$/, "") + "\n").join("\n");
     const fileItems = [{ title: "nomad_core_all.sql", sub: "전체 · 적용 순서대로 합침", desc: "migrations " + files.length + "개를 파일명 순으로 이어 붙인 원문", sql: joined, filename: "nomad_core_all.sql" },
-      ...files.map((f) => ({ title: baseName(f.path), sub: f.path.replace(/\/[^/]*$/, ""), desc: sqlSummary(f.sql), sql: f.sql, filename: baseName(f.path) }))];
+      ...files.map((f) => ({ title: baseName(f.path), sub: f.path.replace(/\/[^/]*$/, ""), desc: sqlSummary(f.sql), doc: docFiles[f.path], sql: f.sql, filename: baseName(f.path) }))];
     const areaItems = areas.map((a, i) => {
       const sql = areaSql(a);
       return sql ? { title: a.name, sub: "영역 · 테이블 " + a.tables.length + " · 함수 " + (a.functions || []).length, sql, filename: "nomad_core_area_" + (i + 1) + ".sql" } : null;
@@ -280,7 +474,9 @@ function productSqlCards(p) {
     if (g !== k || seen.has(f.path)) return false;
     seen.add(f.path); return true;
   });
-  const fileItem = (f) => ({ title: baseName(f.path), sub: f.path.replace(/\/[^/]*$/, ""), desc: sqlSummary(f.sql), sql: f.sql, filename: baseName(f.path) });
+  const docFiles = (p.doc && p.doc.files) || {};
+  const fileItem = (f) => ({ title: baseName(f.path), sub: f.path.replace(/\/[^/]*$/, "") + (f.src && f.src !== f.path ? " · 원본 " + f.src : ""),
+    desc: sqlSummary(f.sql), doc: docFiles[f.src || f.path], sql: f.sql, filename: baseName(f.path) });
   const groups = STRUCT_GROUPS.map(([k, label]) => {
     const list = byGroup(k);
     const items = list.map(fileItem);
@@ -323,8 +519,14 @@ function viewProduct(r) {
     state.redraw = draw; draw();
     if (!tables.length) host.replaceChildren(h("div", { class: "empty" }, "이 구조는 아직 정리되지 않았습니다."));
   }
+  // ERD 구조: 지금 탭(표가 있으면), 아니면 테넌트→단일→격리형→모노레포→기존 중 처음으로 표가 있는 구조
+  const vt = (k) => (p.variants[k] || { tables: [] }).tables;
+  const erdKey = !isSql && vt(tab).length ? tab : ["tenant", "single", "isolated", "monorepo", "existing"].find((k) => vt(k).length);
+  const vname = Object.fromEntries(VARIANTS);
   return [
-    h("div", { class: "page-head" }, h("h2", {}, p.name), badge(p.form === "isolated" ? "격리형" : p.form === "org" ? "org형" : "user형", "accent"), (p.clients || []).map((c) => badge(CLIENTS[c] || c)), p.placeholder ? badge("자리표시", "warn") : null, h("p", {}, "레포 " + p.repo + " · " + p.note)),
+    docHead(p.doc, p.name, [badge(p.form === "isolated" ? "격리형" : p.form === "org" ? "org형" : "user형", "accent"), (p.clients || []).map((c) => badge(CLIENTS[c] || c)), p.placeholder ? badge("자리표시", "warn") : null],
+      "레포 " + p.repo + " · " + p.note),
+    diagramSection(p.doc, erdKey ? { title: "표 관계 ERD · " + vname[erdKey] + " · 표 " + vt(erdKey).length, tables: vt(erdKey) } : null),
     tabs, isSql || tab === "local" ? null : filterBar(tables, () => state.redraw()), host];
 }
 
@@ -357,8 +559,8 @@ function render() {
   if (!state.data) return;
   const r = route();
   renderNav(r);
-  const view = r.type === "product" ? viewProduct(r) : r.type === "compare" ? viewCompare() : viewCore(r);
-  $main.replaceChildren(...[view].flat().filter(Boolean));
+  const view = r.type === "product" ? viewProduct(r) : r.type === "category" ? viewCategory(r) : r.type === "compare" ? viewCompare() : viewCore(r);
+  $main.replaceChildren(...[view].flat(Infinity).filter(Boolean));
   const sel = $main.querySelector('.tabs [aria-pressed="true"]'); // 좁은 화면에서 가로 스크롤 밖의 현재 탭을 보이게
   if (sel) sel.scrollIntoView({ block: "nearest", inline: "nearest" });
 }

@@ -1,0 +1,75 @@
+{
+  "slug": "trailer",
+  "icon": "📖",
+  "tagline": "원고·책으로 북트레일러 영상을 만드는 DB",
+  "overview": "조직이 책(원고 메타)을 등록하고 브리프·스토리보드 장면·에셋을 AI로 만든 뒤 영상을 렌더하고 구매 링크·메타데이터를 붙이는 book-trailer의 조직형 이식본이다. trailer 이용권이 있는 조직 멤버가 읽고 owner·admin·editor가 쓰며, AI 실행·렌더·분석 결과 같은 서버 기록은 service_role과 DEFINER 함수만 쓴다. 플랜 C는 작업 공간(trailer)만, B는 전체 화면비·1080p·워터마크 없음·프리미엄 템플릿·음악·SNS 업로드·FLORA 가져오기를, A는 외부 승인 링크·우선 렌더를 더 연다. 생성·렌더는 권리 확인(TR003)이 전제이고, 크레딧 선차감과 nomad_core 작업 등록을 한 트랜잭션으로 하며, 제휴 링크가 있으면 대가성 문구를 강제한다. anon은 표·함수 권한이 없고 공개 경로(링크 클릭·승인)는 서버가 service_role로 부른다.",
+  "diagrams": [
+    {
+      "title": "주요 흐름",
+      "mermaid": "flowchart LR\n  U[사용자] --> BK[(books)]\n  U --> AK[acknowledge_rights]\n  AK --> BK\n  U --> SS[save_scene / reorder_scenes]\n  SS --> SC[(scenes)]\n  SV[서버] --> SR[start_run]\n  SR --> GR[(generation_runs)]\n  SR --> CL[(nomad_core.credit_ledger)]\n  SR --> JB[(nomad_core.jobs)]\n  W[워커] --> FR[finish_run]\n  FR --> SA[(scene_assets)]\n  FR --> BF[(briefs)]\n  SV --> RS[start_render]\n  RS --> RD[(renders)]\n  RS --> JB\n  W --> FN[finish_render]\n  FN --> RD\n  SV --> LC[record_link_click]\n  LC --> CK[(link_clicks)]"
+    },
+    {
+      "title": "AI 실행·렌더 상태",
+      "mermaid": "stateDiagram-v2\n  [*] --> queued\n  queued --> running\n  queued --> canceled\n  queued --> failed\n  running --> succeeded\n  running --> failed\n  running --> queued: 재시도\n  succeeded --> [*]\n  failed --> [*]\n  canceled --> [*]"
+    }
+  ],
+  "files": {
+    "products/trailer/org/0001_trailer.sql": {
+      "summary": "스키마 nomad_trailer·nomad_trailer_private와 표 17개, trailer 기능 10개와 플랜 A·B·C 매핑, 제품 전용 Storage 버킷 4개, 장르 문법·템플릿·운영 상수 시드를 만든다. 사용자 쓰기는 이용권+역할 정책과 컬럼 grant로, 서버 기록은 guard 트리거와 grant로 이중 잠근다. AI 실행과 렌더는 크레딧 선차감·작업 등록·멱등 키를 서버 RPC 한 트랜잭션으로 처리한다.",
+      "parts": [
+        { "title": "표 · 카탈로그(플랫폼 소유)", "items": [
+          ["runtime_config", "운영 상수(서버 전용, 사용자 grant 없음)"],
+          ["grammars", "장르별 트레일러 문법(이야기 비트), 공개 행만 trailer 사용자 읽기"],
+          ["templates", "Remotion 컴포지션 템플릿, premium은 premium_templates 기능 필요"],
+          ["music_tracks", "라이선스 음악 카탈로그, 원본 경로는 사용자 컬럼 grant에서 제외"]
+        ] },
+        { "title": "표 · 콘텐츠(조직 소유)", "items": [
+          ["books", "책(원고 메타), 원문 텍스트는 DB에 두지 않음, 소프트 삭제·증분 동기화"],
+          ["purchase_links", "구매 링크(책당 최대 10), click_count는 서버만 갱신"],
+          ["brand_kits", "브랜드 키트(팔레트·폰트·로고), 조직 기본 또는 책별"],
+          ["trailers", "트레일러 1편(active·approved·archived), 음성·스토리보드 버전·음악 권리 확인은 서버·트리거만"],
+          ["briefs", "브리프 불변 버전, AI 버전은 서버, 사용자는 manual 새 행만"],
+          ["scenes", "스토리보드 장면, 엔드카드는 트리거가 만들고 사용자는 만들거나 지울 수 없음, revision 동시성"],
+          ["metadata_packs", "플랫폼별 메타데이터, 제휴 링크가 있으면 대가성 문구가 설명 첫 줄"]
+        ] },
+        { "title": "표 · 서버 기록", "items": [
+          ["book_digests", "원고 분석 결과(책당 최신 1행)"],
+          ["link_clicks", "구매 링크 클릭(추가 전용, record_link_click으로만 기록)"],
+          ["scene_assets", "장면 에셋(AI 이미지·내레이션·사용자 이미지), 장면·슬롯마다 ready 1개"],
+          ["generation_runs", "AI 실행(digest·brief·storyboard·meta·scene_image·narration), 크레딧 선차감·작업과 1:1"],
+          ["renders", "영상 렌더(화면비·480p~1080p), 워터마크·AI 표시·플랜은 서버가 결정"],
+          ["reviews", "외부 승인 링크(approval_links), 토큰은 sha256만 저장"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["has_access·can_edit·has_catalog_access·valid_palette·valid_hashtags", "정책·CHECK용 판정 함수(authenticated 실행)"],
+          ["acknowledge_rights(p_book_id, p_version)", "사용자가 책 권리 확인을 기록(생성·렌더의 전제)"],
+          ["save_scene(p_scene_id, p_patch, p_expected_revision)", "INVOKER, 장면 내용을 revision 낙관적 동시성으로 저장(TR409)"],
+          ["reorder_scenes(p_trailer_id, p_scene_ids)", "INVOKER, 장면 순서 변경(엔드카드는 마지막)"],
+          ["start_run·finish_run·fail_run", "service_role, AI 실행 시작(선차감+작업)·결과 저장·실패 기록"],
+          ["start_render·finish_render·fail_render", "service_role, 기능·권리·엔드카드·인용·에셋·음악 검사 후 렌더 시작과 종료(보존 C 14일·유료 90일)"],
+          ["reconcile_runs(p_organization_id)", "작업만 끝난 실행·렌더 행을 정리해 영구 TR002를 막는다"],
+          ["record_link_click(p_code, …)", "공개 리다이렉트 서버가 구매 링크 클릭을 기록"],
+          ["open_review·decide_review", "외부 승인 링크 열기(토큰 해시)와 공개 페이지 결정 기록"],
+          ["import_flora_book(p_organization_id, …)", "서버가 넘긴 FLORA 책 정보로 책 생성(flora_import)"],
+          ["내부·트리거 함수", "서버 쓰기 잠금·수량 한도(plan_limits)·서버 컬럼 보호·엔드카드 생성·브리프 버전·대가성 문구·실행·승인 상태 전이"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, trailer 이용권이 있는 같은 조직 멤버만 읽기"],
+          ["이중 잠금", "서버 기록·카탈로그는 사용자 grant 없음+guard 트리거(42501)"],
+          ["anon", "표·함수 권한 0, 공개 경로는 서버가 service_role로 호출"],
+          ["Storage", "trailer-files(사용자 업로드)·trailer-media(서버 생성)·trailer-catalog(service_role만)·trailer-previews(공개 미리보기)"]
+        ] }
+      ]
+    },
+    "products/trailer/org/0002_ai.sql": {
+      "summary": "trailer 기능에 ai_chat·voice_chat을 추가해 A·B·C 전 플랜에 열고, nomad_core.ai_routing_settings에 trailer.digest·brief·storyboard·meta 등 기능별 AI·음성 라우팅 기본값을 넣는다.",
+      "parts": [
+        { "title": "데이터", "items": [
+          ["features·plan_features", "ai_chat(트레일러 코치)·voice_chat, 전 플랜"],
+          ["ai_routing_settings 시드", "trailer.digest·brief·storyboard·meta·compliance·knowledge·prompt_en, chat, wiki.*, dify.aux, narration, dictation, voice_chat"]
+        ] }
+      ]
+    },
+    "products/trailer/check_org.sql": { "summary": "조직형 검사: 조직 2곳 교차 거부, owner·editor·viewer 역할, 서버 컬럼 잠금, 엔드카드·대가성 문구, 실행·렌더 선차감·멱등·취소 환불, 플랜 잠금, 조직 비활성, 함수 권한을 확인하고 rollback한다." }
+  }
+}
