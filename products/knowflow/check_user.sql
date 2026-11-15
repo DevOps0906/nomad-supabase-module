@@ -135,9 +135,8 @@ select public.t_eq((select (nomad_knowflow.retry_source((select v from t_ids whe
 select public.t_eq((select used_source_jobs from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 2, '같은 멱등 키 재시도 차감 1회(source_jobs)');
 select public.t_eq((select used_video_seconds from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 500, '같은 멱등 키 재시도 차감 1회(video_seconds)');
 
--- 보고서 잠금: C 플랜(구독 없음)에는 space_reports가 없다 → 서버 insert 거부
-select public.t_role('service_role');
-select public.t_expect(format($q$insert into nomad_knowflow.reports (project_id, user_id, title) values (%L, 'aaaaaaaa-0000-0000-0000-00000000000a', 'r')$q$, (select v from t_ids where k = 'pa')), 'KF403');
+-- 보고서 잠금: C 플랜(구독 없음)에는 space_reports가 없다 → create_report 거부
+select public.t_expect(format($q$select nomad_knowflow.create_report(%L, 'r', 'rk-c')$q$, (select v from t_ids where k = 'pa')), 'KF403');
 
 -- 잠금 준비: C 플랜에서 knowflow 기능을 빼고(검사 트랜잭션 안에서만) A 개인 조직에 B 구독
 reset role;
@@ -151,33 +150,110 @@ select public.t_role('service_role');
 with c as (insert into nomad_knowflow.conversations (project_id, user_id, title)
   select v, 'aaaaaaaa-0000-0000-0000-00000000000a', '대화' from t_ids where k = 'pa' returning id)
 insert into t_ids select 'cv', id from c;
-insert into nomad_knowflow.messages (conversation_id, role, content) select v, 'user', '질문' from t_ids where k = 'cv';
-select public.t_eq((select count(*) from nomad_knowflow.messages), 1, '구독 중 대화·메시지 생성');
-insert into nomad_knowflow.reports (project_id, user_id, title) select v, 'aaaaaaaa-0000-0000-0000-00000000000a', '보고서' from t_ids where k = 'pa';
+-- task-017: 질문·답변·보고서는 RPC만(서버 직접 insert·메시지 수정 거부)
+select public.t_expect(format($q$insert into nomad_knowflow.messages (conversation_id, role, content) values (%L, 'user', '질문')$q$, (select v from t_ids where k = 'cv')), '42501');
+select public.t_expect(format($q$insert into nomad_knowflow.messages (conversation_id, role, content) values (%L, 'assistant', '답변')$q$, (select v from t_ids where k = 'cv')), '42501');
+select public.t_expect($q$update nomad_knowflow.messages set role = 'user'$q$, '42501');
+select public.t_expect(format($q$insert into nomad_knowflow.reports (project_id, user_id, title) values (%L, 'aaaaaaaa-0000-0000-0000-00000000000a', '보고서')$q$, (select v from t_ids where k = 'pa')), '42501');
+-- 질문: 멱등 키 재요청은 같은 메시지·차감 1회, 같은 키 다른 내용은 KF409, 남의 대화는 P0002
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+insert into t_ids select 'q1', (nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문', 'qk-1') ->> 'message_id')::uuid;
+select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'message_id')::uuid = (select v from t_ids where k = 'q1'))::int
+  from nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문', 'qk-1') r), 1, '질문 멱등 키 재요청은 같은 메시지');
+select public.t_eq((select used_questions from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 1, '같은 멱등 키 질문 차감 1회');
+select public.t_expect(format($q$select nomad_knowflow.ask_question(%L, '다른 질문', 'qk-1')$q$, (select v from t_ids where k = 'cv')), 'KF409');
+select public.t_eq((select count(*) from nomad_knowflow.messages), 1, '구독 중 질문 생성');
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_expect(format($q$select nomad_knowflow.ask_question(%L, 'x', 'qk-b')$q$, (select v from t_ids where k = 'cv')), 'P0002');
+select public.t_expect($q$select nomad_knowflow.save_answer(gen_random_uuid(), 'x')$q$, '42501');
+-- 월 질문 한도(5): 4개 더 → 6번째 KF429(차감 없음)
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+insert into t_ids select 'q' || i, (nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문 ' || i, 'qk-' || i) ->> 'message_id')::uuid
+  from generate_series(2, 5) i;
+select public.t_expect(format($q$select nomad_knowflow.ask_question(%L, '질문 6', 'qk-6')$q$, (select v from t_ids where k = 'cv')), 'KF429');
+select public.t_eq((select used_questions from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 5, '질문 한도 초과는 차감 없음');
+-- 답변(service_role): 질문 1개당 1개, 재저장은 같은 답변, assistant·없는 메시지에는 P0002
+select public.t_role('service_role');
+insert into t_ids select 'an', (nomad_knowflow.save_answer((select v from t_ids where k = 'q1'), '답변', '{"chunks":[]}') ->> 'answer_id')::uuid;
+select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'answer_id')::uuid = (select v from t_ids where k = 'an'))::int
+  from nomad_knowflow.save_answer((select v from t_ids where k = 'q1'), '답변 2') r), 1, '같은 질문 답변 재저장은 같은 답변');
+select public.t_expect(format($q$select nomad_knowflow.save_answer(%L, 'x')$q$, (select v from t_ids where k = 'an')), 'P0002');
+select public.t_expect($q$select nomad_knowflow.save_answer(gen_random_uuid(), 'x')$q$, 'P0002');
+select public.t_eq((select count(*) from nomad_knowflow.messages m where m.reply_to = (select v from t_ids where k = 'q1')), 1, '답변은 질문 참조');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select ((nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문', 'qk-1') ->> 'answer_id')::uuid
+  = (select v from t_ids where k = 'an'))::int), 1, '질문 재요청은 답변 id도 반환');
+-- 보고서: 멱등 키 재요청 차감 1회 · 다른 내용 KF409 · 남의 프로젝트 P0002 · 생성 작업 실패 시 환불·failed
+insert into t_ids select 'rp', (nomad_knowflow.create_report((select v from t_ids where k = 'pa'), '보고서', 'rk-r1') ->> 'report_id')::uuid;
+select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'report_id')::uuid = (select v from t_ids where k = 'rp'))::int
+  from nomad_knowflow.create_report((select v from t_ids where k = 'pa'), '보고서', 'rk-r1') r), 1, '보고서 멱등 키 재요청은 같은 보고서');
+select public.t_eq((select used_reports from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 1, '같은 멱등 키 보고서 차감 1회');
+select public.t_expect(format($q$select nomad_knowflow.create_report(%L, '다른 보고서', 'rk-r1')$q$, (select v from t_ids where k = 'pa')), 'KF409');
 select public.t_eq((select count(*) from nomad_knowflow.reports), 1, 'B 구독 중 보고서 생성');
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_expect(format($q$select nomad_knowflow.create_report(%L, 'x', 'rk-b')$q$, (select v from t_ids where k = 'pa')), 'P0002');
 reset role;
+update nomad_knowflow.processing_jobs set status = 'cancelled' where status = 'queued' and job_type <> 'report_generate';
+select public.t_role('service_role');
+delete from t_job;
+insert into t_job select nomad_knowflow.claim_job(60);
+select public.t_eq((select count(*) from t_job where (j ->> 'report_id')::uuid = (select v from t_ids where k = 'rp')), 1, '보고서 생성 작업 획득');
+select public.t_eq((select count(*) from nomad_knowflow.fail_job(((select j from t_job) ->> 'id')::uuid, ((select j from t_job) ->> 'attempt_count')::int, 'llm_error', false) f where f = 'failed'), 1, '보고서 작업 실패');
+reset role;
+select public.t_eq((select used_reports from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 0, '보고서 실패 환불');
+select public.t_eq((select count(*) from nomad_knowflow.reports where id = (select v from t_ids where k = 'rp') and status = 'failed'), 1, '보고서 실패 상태');
+-- 환불은 차감 1건에 묶인다(quota_charged_period 표식): 같은 보고서 잡 두 번 실패·ready 뒤 실패·지난달 표식은 환불 없음
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+insert into t_ids select 'rp2', (nomad_knowflow.create_report((select v from t_ids where k = 'pa'), '보고서 2', 'rk-r2') ->> 'report_id')::uuid;
+select public.t_eq((select used_reports from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 1, '보고서 2 차감');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow.reports where id = (select v from t_ids where k = 'rp') and quota_charged_period is null), 1, '환불한 보고서는 표식 해제');
+insert into nomad_knowflow.processing_jobs (user_id, report_id, job_type) select 'aaaaaaaa-0000-0000-0000-00000000000a'::uuid, v, 'report_generate' from t_ids where k = 'rp';
+update nomad_knowflow.reports set status = 'ready' where id = (select v from t_ids where k = 'rp2');
+select public.t_role('service_role');
+delete from t_job;
+insert into t_job select nomad_knowflow.claim_job(60);
+select nomad_knowflow.fail_job(((select j from t_job) ->> 'id')::uuid, ((select j from t_job) ->> 'attempt_count')::int, 'llm_error', false);
+delete from t_job;
+insert into t_job select nomad_knowflow.claim_job(60);
+select nomad_knowflow.fail_job(((select j from t_job) ->> 'id')::uuid, ((select j from t_job) ->> 'attempt_count')::int, 'llm_error', false);
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow.processing_jobs where job_type = 'report_generate' and status = 'failed'), 3, '보고서 잡 3건 실패');
+select public.t_eq((select used_reports from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 1, '같은 보고서 두 번째 실패·ready 뒤 실패는 환불 없음');
+select public.t_eq((select count(*) from nomad_knowflow.reports where id = (select v from t_ids where k = 'rp2') and status = 'ready'), 1, 'ready 보고서 상태 유지');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+insert into t_ids select 'rp3', (nomad_knowflow.create_report((select v from t_ids where k = 'pa'), '보고서 3', 'rk-r3') ->> 'report_id')::uuid;
+reset role;
+update nomad_knowflow.reports set quota_charged_period = (quota_charged_period - interval '1 month')::date where id = (select v from t_ids where k = 'rp3');
+select public.t_role('service_role');
+delete from t_job;
+insert into t_job select nomad_knowflow.claim_job(60);
+select public.t_eq((select count(*) from t_job where (j ->> 'report_id')::uuid = (select v from t_ids where k = 'rp3')), 1, '보고서 3 작업 획득');
+select nomad_knowflow.fail_job(((select j from t_job) ->> 'id')::uuid, ((select j from t_job) ->> 'attempt_count')::int, 'llm_error', false);
+reset role;
+select public.t_eq((select used_reports from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 2, '지난달 표식 보고서 실패는 이번 달 사용량 불변');
 update nomad_core.subscriptions set status = 'inactive'
  where organization_id = (select v from t_ids where k = 'oa') and product_code = 'knowflow';
 
 -- 잠김: 대화·등록·재시도 거부
 select public.t_role('service_role');
 select public.t_expect(format($q$insert into nomad_knowflow.conversations (project_id, user_id) values (%L, 'aaaaaaaa-0000-0000-0000-00000000000a')$q$, (select v from t_ids where k = 'pa')), 'KF403');
-select public.t_expect(format($q$insert into nomad_knowflow.messages (conversation_id, role, content) values (%L, 'user', '질문2')$q$, (select v from t_ids where k = 'cv')), 'KF403');
 select public.t_expect(format($q$select nomad_knowflow.register_youtube_source('aaaaaaaa-0000-0000-0000-00000000000a', %L, 'lmnopqrstuv', '영상', '채널', 10, 'ky9', 'hy9')$q$, (select v from t_ids where k = 'pa')), 'KF403');
 select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.ask_question(%L, '질문 9', 'qk-9')$q$, (select v from t_ids where k = 'cv')), 'KF403');
+select public.t_expect(format($q$select nomad_knowflow.ask_question(%L, '질문', 'qk-1')$q$, (select v from t_ids where k = 'cv')), 'KF403');
+select public.t_expect(format($q$select nomad_knowflow.create_report(%L, '보고서', 'rk-r1')$q$, (select v from t_ids where k = 'pa')), 'KF403');
 select public.t_expect(format($q$select nomad_knowflow.register_pdf_source(%L, 't', 'aaaaaaaa-0000-0000-0000-00000000000a/%s/44444444-4444-4444-4444-444444444444.pdf', null, 'key-9', 'hash-9')$q$, (select v from t_ids where k = 'pa'), (select v from t_ids where k = 'pa')), 'KF403');
 select public.t_expect(format($q$select nomad_knowflow.retry_source(%L, 'rk-2', 'rh-2')$q$, (select v from t_ids where k = 'yt')), 'KF403');
 -- 잠겨도 읽기는 유지
 select public.t_eq((select count(*) from nomad_knowflow.sources), 1, '잠김: 자료 읽기 유지');
-select public.t_eq((select count(*) from nomad_knowflow.messages), 1, '잠김: 메시지 읽기 유지');
+select public.t_eq((select count(*) from nomad_knowflow.messages), 6, '잠김: 메시지 읽기 유지');
 select public.t_eq((select count(*) from nomad_knowflow.projects), 2, '잠김: 프로젝트 읽기 유지');
 select public.t_eq((select (count(*) > 0)::int from nomad_knowflow.list_project_jobs((select v from t_ids where k = 'pa'))), 1, '잠김: 작업 목록 유지');
--- 잠김: 보고서 거부 · assistant 답변은 허용 · 없는 대화는 FK(23503)
+-- 잠김: 잠기기 전 질문의 답변 저장은 허용
 select public.t_role('service_role');
-select public.t_expect(format($q$insert into nomad_knowflow.reports (project_id, user_id, title) values (%L, 'aaaaaaaa-0000-0000-0000-00000000000a', 'r2')$q$, (select v from t_ids where k = 'pa')), 'KF403');
-insert into nomad_knowflow.messages (conversation_id, role, content) select v, 'assistant', '답변' from t_ids where k = 'cv';
-select public.t_eq((select count(*) from nomad_knowflow.messages where role = 'assistant'), 1, '잠김: assistant 답변 허용');
-select public.t_expect($q$insert into nomad_knowflow.messages (conversation_id, role, content) values (gen_random_uuid(), 'user', 'x')$q$, '23503');
+select nomad_knowflow.save_answer((select v from t_ids where k = 'q2'), '답변 q2');
+select public.t_eq((select count(*) from nomad_knowflow.messages where role = 'assistant'), 2, '잠김: assistant 답변 허용');
 -- 잠김에도 남의 프로젝트·자료는 P0002(존재 노출 없음)
 select public.t_expect(format($q$select nomad_knowflow.register_youtube_source('aaaaaaaa-0000-0000-0000-00000000000a', %L, 'lmnopqrstuv', '영상', '채널', 10, 'ky8', 'hy8')$q$, (select v from t_ids where k = 'pb')), 'P0002');
 select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');

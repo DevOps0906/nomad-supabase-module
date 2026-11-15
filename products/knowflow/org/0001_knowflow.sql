@@ -156,10 +156,16 @@ create table nomad_knowflow.messages (
   role text not null check (role in ('user', 'assistant')),
   content text not null,
   citation_metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(citation_metadata) = 'object'),
-  created_at timestamptz not null default now()
+  reply_to uuid,
+  created_at timestamptz not null default now(),
+  unique (id, conversation_id),
+  -- 답변은 같은 대화의 질문을 참조한다(task-017). 이관한 과거 답변은 null
+  foreign key (reply_to, conversation_id) references nomad_knowflow.messages (id, conversation_id) on delete cascade,
+  check (reply_to is null or role = 'assistant')
 );
-comment on table nomad_knowflow.messages is '대화 메시지(추가만, 대화를 통해 소유 확인)';
+comment on table nomad_knowflow.messages is '대화 메시지(추가만, 대화를 통해 소유 확인). 쓰기는 ask_question·save_answer RPC만';
 create index messages_conversation_id_idx on nomad_knowflow.messages (conversation_id, created_at);
+create unique index messages_one_answer_per_question on nomad_knowflow.messages (reply_to) where reply_to is not null;
 
 create table nomad_knowflow.reports (
   id uuid primary key default gen_random_uuid(),
@@ -169,12 +175,14 @@ create table nomad_knowflow.reports (
   content text not null default '',
   format text not null default 'markdown' check (format = 'markdown'),
   status text not null default 'generating' check (status in ('generating', 'ready', 'failed')),
+  quota_charged_period date,
   deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   foreign key (project_id, organization_id) references nomad_knowflow.projects (id, organization_id) on delete cascade
 );
 comment on table nomad_knowflow.reports is '리포트(동기화 대상: updated_at·deleted_at)';
+comment on column nomad_knowflow.reports.quota_charged_period is 'monthly_reports 차감 표식(차감한 달). 환불 시 null(1회)';
 create index reports_organization_id_idx on nomad_knowflow.reports (organization_id);
 create index reports_org_sync_idx on nomad_knowflow.reports (organization_id, updated_at);
 create index reports_project_id_idx on nomad_knowflow.reports (project_id);
@@ -292,6 +300,9 @@ alter table nomad_knowflow_private.auth_rate_limits enable row level security;
 revoke all on all tables in schema nomad_knowflow from public, anon, authenticated;
 revoke all on all tables in schema nomad_knowflow_private from public, anon, authenticated, service_role;
 grant select, insert, update, delete on all tables in schema nomad_knowflow to service_role;
+-- 질문·답변·보고서 생성은 쿼터·멱등 RPC만(task-017): 서버도 messages insert·update, reports insert 불가
+revoke insert, update on nomad_knowflow.messages from service_role;
+revoke insert on nomad_knowflow.reports from service_role;
 -- 사용자 롤은 SELECT만. 쓰기는 SECURITY DEFINER RPC로만. anon은 테이블 권한 없음(공개 읽기 없음)
 grant select on
   nomad_knowflow.org_quotas, nomad_knowflow.projects, nomad_knowflow.sources, nomad_knowflow.source_moments,
@@ -357,7 +368,7 @@ begin
 end;
 $$;
 
--- 대화·질문 생성 잠금(knowledge_chat). 쓰기는 서버(service_role) 직접 insert뿐이라 BEFORE INSERT 트리거로 막는다.
+-- 대화·질문 생성 잠금(knowledge_chat). 대화는 서버(service_role) 직접 insert, 질문·답변은 RPC만(task-017) — 트리거는 둘 다의 마지막 방어선.
 -- 메시지는 role='user'(질문)만 잠그고 assistant 답변은 허용(잠기기 직전 질문의 답변 저장). 대화가 없으면 판정을 건너뛰고 FK(23503)에 맡긴다.
 create function nomad_knowflow_private.require_chat_feature() returns trigger
 language plpgsql security definer set search_path = ''
@@ -380,7 +391,7 @@ create trigger conversations_require_chat before insert on nomad_knowflow.conver
 create trigger messages_require_chat before insert on nomad_knowflow.messages
   for each row execute function nomad_knowflow_private.require_chat_feature();
 
--- 보고서 생성 잠금(space_reports). 쓰기는 서버·워커(service_role) 직접 insert뿐
+-- 보고서 생성 잠금(space_reports). 생성은 create_report RPC만(task-017), 트리거는 마지막 방어선
 create function nomad_knowflow_private.require_reports_feature() returns trigger
 language plpgsql security definer set search_path = ''
 as $$
@@ -487,6 +498,25 @@ begin
 end;
 $$;
 
+-- 보고서 쿼터 환불(task-017): 차감 표식(quota_charged_period)을 지우는 데 성공했을 때만 1회. ready 보고서는 환불 안 함.
+-- 차감한 달이 이번 달일 때만 이번 달 사용량에서 뺀다(다른 달이면 표식만 지운다)
+create function nomad_knowflow_private.refund_report_quota(p_report_id uuid) returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare v_owner uuid; v_period date;
+begin
+  update nomad_knowflow.reports r set quota_charged_period = null
+    from (select id, quota_charged_period from nomad_knowflow.reports
+           where id = p_report_id and quota_charged_period is not null and status <> 'ready' for update) old
+   where r.id = old.id
+  returning r.organization_id, old.quota_charged_period into v_owner, v_period;
+  if not found then return; end if;
+  if v_period = nomad_knowflow_private.current_period_start() then
+    perform nomad_knowflow_private.refund_quota(v_owner, 'reports', 1);
+  end if;
+end;
+$$;
+
 create function nomad_knowflow_private.claim_idempotency_key(
   p_org uuid, p_key text, p_request_hash text, p_resource_type text, p_resource_id uuid
 ) returns table (is_new boolean, resource_id uuid)
@@ -534,7 +564,7 @@ as $$
 declare v_job record; v_count integer := 0;
 begin
   for v_job in
-    select id, organization_id, source_id, job_type from nomad_knowflow.processing_jobs
+    select id, organization_id, source_id, report_id, job_type from nomad_knowflow.processing_jobs
      where status = 'running' and locked_until < now() and attempt_count >= max_attempts
      for update skip locked
   loop
@@ -545,6 +575,10 @@ begin
       perform nomad_knowflow_private.sync_source_status(v_job.source_id, 'failed', 'lease_expired');
       perform nomad_knowflow_private.refund_quota(v_job.organization_id, 'source_jobs', 1);
       perform nomad_knowflow_private.refund_source_video_seconds(v_job.source_id);
+    end if;
+    if v_job.report_id is not null and v_job.job_type = 'report_generate' then
+      perform nomad_knowflow_private.refund_report_quota(v_job.report_id);
+      update nomad_knowflow.reports set status = 'failed' where id = v_job.report_id and status = 'generating';
     end if;
     v_count := v_count + 1;
   end loop;
@@ -1138,11 +1172,13 @@ declare
   v_job nomad_knowflow.processing_jobs;
   v_code text := case when p_error_code ~ '^[a-z0-9_]{1,64}$' then p_error_code else 'unknown' end;
   v_ingest boolean;
+  v_report boolean;
 begin
   select * into v_job from nomad_knowflow.processing_jobs
    where id = p_job_id and status = 'running' and attempt_count = p_attempt for update;
   if not found then return 'stale'; end if;
   v_ingest := v_job.source_id is not null and v_job.job_type = 'source_ingest';
+  v_report := v_job.report_id is not null and v_job.job_type = 'report_generate';
   if coalesce(p_retryable, false) and v_job.attempt_count < v_job.max_attempts then
     update nomad_knowflow.processing_jobs set status = 'queued', locked_until = null, error_code = v_code where id = v_job.id;
     if v_ingest then perform nomad_knowflow_private.sync_source_status(v_job.source_id, 'queued', null); end if;
@@ -1156,6 +1192,11 @@ begin
     perform nomad_knowflow_private.sync_source_status(v_job.source_id, 'failed', v_code);
     perform nomad_knowflow_private.refund_quota(v_job.organization_id, 'source_jobs', 1);
     perform nomad_knowflow_private.refund_source_video_seconds(v_job.source_id);
+  end if;
+  if v_report then
+    -- 보고서 생성 최종 실패: 보고서 failed + 월 보고서 쿼터 환불(task-017)
+    perform nomad_knowflow_private.refund_report_quota(v_job.report_id);
+    update nomad_knowflow.reports set status = 'failed' where id = v_job.report_id and status = 'generating';
   end if;
   return 'failed';
 end;
@@ -1325,6 +1366,127 @@ begin
 end;
 $$;
 
+-- ===== 질문·답변·보고서(task-017): 월 쿼터를 DB가 보장. 테이블 직접 insert는 서버도 불가 =====
+-- 질문: 대화 잠금 → 기능(knowledge_chat) → 멱등 키(요청 해시 = 대화·내용) → monthly_questions 차감 → user 메시지 저장.
+-- 같은 키·같은 내용 재요청은 같은 메시지(차감 1회, 답변이 있으면 answer_id), 같은 키·다른 내용은 KF409. 잠기면 같은 키도 KF403
+create function nomad_knowflow.ask_question(p_conversation_id uuid, p_content text, p_idempotency_key text) returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_conv uuid;
+  v_org uuid;
+  v_message_id uuid := gen_random_uuid();
+  v_claim record;
+begin
+  if v_uid is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
+  if p_content is null or char_length(btrim(p_content)) = 0 or char_length(p_content) > 20000 then
+    raise exception 'invalid_content' using errcode = '22023';
+  end if;
+  -- 쓰기 권한(owner·admin·editor)이 있는 조직의 대화만. 타인 것·없는 것·삭제된 것·viewer는 같은 오류
+  select c.id, c.organization_id into v_conv, v_org
+    from nomad_knowflow.conversations c join nomad_knowflow.projects p on p.id = c.project_id
+   where c.id = p_conversation_id and nomad_knowflow_private.can_write(c.organization_id)
+     and c.deleted_at is null and p.deleted_at is null
+   for update of c;
+  if not found then raise exception 'conversation_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(v_org, 'knowledge_chat');
+
+  select * into v_claim from nomad_knowflow_private.claim_idempotency_key(
+    v_org, p_idempotency_key, md5(v_conv::text || ':' || p_content), 'question', v_message_id);
+  if not v_claim.is_new then
+    if not exists (select 1 from nomad_knowflow.messages where id = v_claim.resource_id and conversation_id = v_conv and role = 'user') then
+      raise exception 'idempotency_resource_missing' using errcode = 'KF410';
+    end if;
+    return jsonb_build_object('message_id', v_claim.resource_id, 'duplicate', true,
+      'answer_id', (select id from nomad_knowflow.messages where reply_to = v_claim.resource_id));
+  end if;
+
+  perform nomad_knowflow_private.consume_quota_for(v_org, 'questions', 1);
+  insert into nomad_knowflow.messages (id, conversation_id, role, content) values (v_message_id, v_conv, 'user', p_content);
+  return jsonb_build_object('message_id', v_message_id, 'duplicate', false, 'answer_id', null);
+end;
+$$;
+
+-- 답변 저장(service_role 전용: 서버가 AI 답변을 질문에 붙인다). 질문 1개당 답변 1개, 재저장은 같은 답변(duplicate).
+-- 잠김과 무관(잠기기 직전 질문의 답변). 질문이 아니거나 없거나 삭제된 대화면 P0002
+create function nomad_knowflow.save_answer(p_question_id uuid, p_content text, p_citation_metadata jsonb default '{}'::jsonb)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_conv uuid;
+  v_answer_id uuid;
+begin
+  if p_content is null or char_length(p_content) = 0 or char_length(p_content) > 100000 then
+    raise exception 'invalid_content' using errcode = '22023';
+  end if;
+  if p_citation_metadata is null or jsonb_typeof(p_citation_metadata) <> 'object' then
+    raise exception 'invalid_citation_metadata' using errcode = '22023';
+  end if;
+  select m.conversation_id into v_conv
+    from nomad_knowflow.messages m join nomad_knowflow.conversations c on c.id = m.conversation_id
+   where m.id = p_question_id and m.role = 'user' and c.deleted_at is null
+   for update of m;
+  if not found then raise exception 'question_not_found' using errcode = 'P0002'; end if;
+  insert into nomad_knowflow.messages (conversation_id, role, content, citation_metadata, reply_to)
+  values (v_conv, 'assistant', p_content, p_citation_metadata, p_question_id)
+  on conflict (reply_to) where reply_to is not null do nothing
+  returning id into v_answer_id;
+  if v_answer_id is null then
+    select id into v_answer_id from nomad_knowflow.messages where reply_to = p_question_id;
+    return jsonb_build_object('answer_id', v_answer_id, 'duplicate', true);
+  end if;
+  return jsonb_build_object('answer_id', v_answer_id, 'duplicate', false);
+end;
+$$;
+
+-- 보고서: 프로젝트 잠금 → 기능(space_reports) → 멱등 키(요청 해시 = 프로젝트·제목) → monthly_reports 차감 → 보고서(generating)+생성 작업.
+-- 생성 작업이 최종 실패하면 fail_job·reap_expired_jobs가 보고서를 failed로 두고 차감 표식(quota_charged_period)이 남아 있을 때만 1회 환불한다
+create function nomad_knowflow.create_report(p_project_id uuid, p_title text, p_idempotency_key text) returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_project_id uuid;
+  v_org uuid;
+  v_report_id uuid := gen_random_uuid();
+  v_job_id uuid;
+  v_claim record;
+begin
+  if v_uid is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
+  if p_title is null or char_length(btrim(p_title)) not between 1 and 300 then
+    raise exception 'invalid_title' using errcode = '22023';
+  end if;
+  select id, organization_id into v_project_id, v_org from nomad_knowflow.projects
+   where id = p_project_id and deleted_at is null and nomad_knowflow_private.can_write(organization_id)
+   for update;
+  if not found then raise exception 'project_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(v_org, 'space_reports');
+
+  select * into v_claim from nomad_knowflow_private.claim_idempotency_key(
+    v_org, p_idempotency_key, md5(v_project_id::text || ':' || btrim(p_title)), 'report', v_report_id);
+  if not v_claim.is_new then
+    select r.id, j.id into v_report_id, v_job_id
+      from nomad_knowflow.reports r
+      left join lateral (
+        select id from nomad_knowflow.processing_jobs where report_id = r.id and job_type = 'report_generate' order by created_at desc limit 1
+      ) j on true
+     where r.id = v_claim.resource_id and r.organization_id = v_org;
+    if v_report_id is null then raise exception 'idempotency_resource_missing' using errcode = 'KF410'; end if;
+    return jsonb_build_object('report_id', v_report_id, 'job_id', v_job_id, 'duplicate', true);
+  end if;
+
+  perform nomad_knowflow_private.consume_quota_for(v_org, 'reports', 1);
+  insert into nomad_knowflow.reports (id, project_id, organization_id, title, quota_charged_period)
+  values (v_report_id, v_project_id, v_org, btrim(p_title), nomad_knowflow_private.current_period_start());
+  insert into nomad_knowflow.processing_jobs (organization_id, report_id, job_type)
+  values (v_org, v_report_id, 'report_generate')
+  returning id into v_job_id;
+  return jsonb_build_object('report_id', v_report_id, 'job_id', v_job_id, 'duplicate', false);
+end;
+$$;
+
 -- ===== EXECUTE 권한: 전부 회수 후 필요한 것만 =====
 revoke execute on all functions in schema nomad_knowflow from public, anon, authenticated, service_role;
 revoke execute on all functions in schema nomad_knowflow_private from public, anon, authenticated, service_role;
@@ -1333,7 +1495,8 @@ grant execute on function
   nomad_knowflow.create_project(uuid, text, text), nomad_knowflow.update_project(uuid, jsonb), nomad_knowflow.delete_project(uuid),
   nomad_knowflow.register_pdf_source(uuid, text, text, text, text, text), nomad_knowflow.get_source_chunks(uuid, integer, integer, uuid),
   nomad_knowflow.delete_sources(uuid, uuid[]), nomad_knowflow.retry_source(uuid, text, text),
-  nomad_knowflow.list_project_jobs(uuid, text, timestamptz, uuid, integer)
+  nomad_knowflow.list_project_jobs(uuid, text, timestamptz, uuid, integer),
+  nomad_knowflow.ask_question(uuid, text, text), nomad_knowflow.create_report(uuid, text, text)
 to authenticated;
 grant execute on function
   nomad_knowflow.register_youtube_source(uuid, uuid, text, text, text, integer, text, text),
@@ -1341,7 +1504,7 @@ grant execute on function
   nomad_knowflow.progress_job(uuid, integer, text, integer), nomad_knowflow.complete_job(uuid, integer),
   nomad_knowflow.fail_job(uuid, integer, text, boolean), nomad_knowflow.replace_source_chunks(uuid, integer, jsonb),
   nomad_knowflow.replace_source_moments(uuid, integer, jsonb), nomad_knowflow.sweep_source_rechecks(integer),
-  nomad_knowflow.apply_source_recheck(uuid, integer, jsonb)
+  nomad_knowflow.apply_source_recheck(uuid, integer, jsonb), nomad_knowflow.save_answer(uuid, text, jsonb)
 to service_role;
 
 commit;

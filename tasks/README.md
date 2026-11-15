@@ -19,7 +19,7 @@
 | task-015 | platform-docs 제품 이식 P1(erp·school·poll·floria) → P2~P4(코어 웨이브 후) | W3 | task-012 | 높음 | builder | 완료(2026-11-16: db reset 후 core 12/12·제품 28개 PASS, 번들 56개·표본 5/5) |
 
 | task-016 | erp 가입 코드 무차별 시도 제한(값 반환 + rate_limit_take) | W3 | task-015 | 높음 | builder | 완료(구현은 cbf1ccd, 응답 동일성 검사 추가) |
-| task-017 | knowflow 질문·보고서 쿼터 차감 멱등 RPC(ask_question·create_report, 실패 환불, 서버 직접 insert 차단) | W3 | task-007 | 높음 | builder | 진행 |
+| task-017 | knowflow 질문·보고서 쿼터 차감 멱등 RPC(ask_question·create_report, 실패 환불, 서버 직접 insert 차단) | W3 | task-007 | 높음 | builder | 완료 |
 | task-018 | personal 생년월일·사주 입력 암호문 전환(astro 방식, 풀이 결과는 평문) | W3 | task-015 | 높음 | builder | 완료(readings 쓰기 서버 전용 여부는 결정 대기) |
 | task-019 | erp 구독 끊긴 조직 가입 코드 거부(없는 코드와 같은 P0002 응답) | W3 | task-016 | 보통 | builder | 완료 |
 | task-020 | install-db.sh --product를 청사진 대신 products/<slug> 이식본 설치로(보안 리뷰 전 청사진 배포 차단) | W3 | task-013 | 높음 | builder | 진행 |
