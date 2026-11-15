@@ -4,7 +4,7 @@
 
 ## 진행 현황
 
-2026-11-16 기준, 작업 표(`tasks/README.md`)의 task-001~020이 모두 완료되었습니다.
+2026-11-16 기준, 작업 표(`tasks/README.md`)의 task-001~020이 모두 완료되어 `main`에 머지되었습니다.
 
 | 영역 | 상태 | 확인 |
 |---|---|---|
@@ -12,7 +12,7 @@
 | 제품 이식본 `products/<slug>/` 28개 | 완료. 27개는 단일·테넌트, hospital은 격리형 | 제품 검사(`run_check.sh`) 28/28 |
 | 배포 번들 `bundles/` 56개 | 단일 27 · 테넌트 27 · 모노레포 1 · 격리형 1 | `tests/bundles.sh` 표본 5/5 |
 | 다른 저장소 설치기 | `products/` 이식본을 설치 | `tests/install_db.sh` 82/0 |
-| 스키마 대시보드 | 제품·번들·표 구조 조회 | `http://127.0.0.1:8766` |
+| 스키마 대시보드 | 분류별 메뉴, 제품 카드, 구조도·ERD, SQL 파일별 설명 | `http://127.0.0.1:8766` |
 | 각 제품 레포 앱 코드에 적용 | 대기 | 제품별 `existing.md`의 "앱 변경" 목록 |
 
 사용자가 결정할 항목:
@@ -45,6 +45,72 @@ SQL 파일을 SQL Editor에 복사해 붙여 넣는 방식은 권하지 않습�
 | 기존 제품 저장소 | `bash scripts/install-db.sh <대상 경로> --product <slug>[:user\|org]`로 실행합니다. 공통 코어와 이식본이 대상의 `supabase/migrations/`에 복사되고 해시가 잠금 파일에 기록됩니다. 그다음 `npx supabase db push`로 적용합니다. |
 
 기존 운영 DB에 이미 같은 이름의 표가 있으면 바로 적용하면 안 됩니다. 제품의 `existing.md`에 적힌 차이와 데이터 이전 절차를 먼저 확인합니다.
+
+## 제품 DB 한눈에 보기
+
+모든 제품은 공통 코어 `nomad_core` 위에 자기 스키마(`nomad_<slug>`)를 하나씩 올립니다. hospital만 예외로, 코어 없이 단독으로 설치하는 격리형입니다.
+
+```mermaid
+flowchart LR
+    subgraph CORE["공통 코어 nomad_core"]
+        ACC["계정·조직·멤버십"]
+        PLAN["A/B/C 플랜·기능 잠금·한도"]
+        OPS["크레딧·작업 큐·감사 로그·레이트 리밋"]
+        AI["AI 계층·API 키(Vault)"]
+    end
+    subgraph PROD["제품 이식본 products/slug/"]
+        USER["user안: 개인 소유"]
+        ORG["org안: 조직 소유"]
+        ISO["isolated: hospital"]
+    end
+    CORE --> USER
+    CORE --> ORG
+    PROD --> BUNDLE["bundles/: 단일 27 · 테넌트 27 · 모노레포 · 격리형"]
+    PROD --> INSTALL["install-db.sh: 기존 저장소에 복사"]
+    BUNDLE --> TARGET[("대상 Supabase 프로젝트")]
+    INSTALL --> TARGET
+    ISO --> BUNDLE
+```
+
+| 분류 | 제품 (클릭하면 SQL 폴더) |
+|---|---|
+| 🎬 콘텐츠·영상 제작 | ✍️ [`contentflow`](products/contentflow/) 블로그 글 기획·검수·승인·발행 관리<br>🎬 [`shorts`](products/shorts/) 쇼핑 숏폼 6단계 제작·발행<br>🎞️ [`sceneflow`](products/sceneflow/) 숏폼·롱폼 영상 제작과 게시 DB<br>📖 [`trailer`](products/trailer/) 원고·책으로 북트레일러 영상을 만드는 DB<br>🎨 [`toon`](products/toon/) 인스타툰·웹툰 제작과 내보내기 |
+| 📰 출판·웹·커뮤니티 | 📰 [`news`](products/news/) 지역신문 뉴스룸·독자 사이트·광고<br>✍️ [`blog`](products/blog/) AI 블로그 원고·다채널 발행·제휴 링크<br>📄 [`docs`](products/docs/) 실무 문서 자동 생성·확정·연동<br>🌸 [`flora`](products/flora/) AI와 함께 책을 쓰고 내보내는 출판 작업 공간<br>💐 [`floria`](products/floria/) 브랜드 사이트 문의·뉴스레터 접수<br>💌 [`microweb`](products/microweb/) 모바일 청첩장 같은 마이크로웹 제작·게시<br>🗳️ [`poll`](products/poll/) 실시간 청중 투표·Q&A DB |
+| 🛒 커머스·동네 거래 | 🛍️ [`commerce`](products/commerce/) 상품DB·AI 상세페이지·마켓 업로드<br>🥕 [`jangter`](products/jangter/) 동네 중고거래 글·채팅·후기<br>🛵 [`baedal`](products/baedal/) 동네 가게 주문·결제·배달 |
+| 🏢 업무·데이터 | 🏢 [`erp`](products/erp/) 회사 재고·판매·인사를 한 DB로<br>📚 [`knowflow`](products/knowflow/) 자료를 모아 묻고 보고서를 만드는 지식 DB<br>📊 [`analytics`](products/analytics/) 데이터셋 업로드부터 분석·보고서까지<br>🏛️ [`arch`](products/arch/) 건축 설계 앱 라이선스·기기·AI 실행 |
+| 🎓 교육·학습 | 🧑‍🏫 [`classroom`](products/classroom/) 교육 과정·자료·퀴즈·사전사후 평가<br>🏫 [`school`](products/school/) 학교 학급·과목·출석 관리<br>📒 [`studynote`](products/studynote/) 원문을 2모델로 정리하는 학습 일지 |
+| 🔮 개인·생활 | 🔮 [`astro`](products/astro/) 사주·타로 리딩과 PDF 발송<br>🔮 [`personal`](products/personal/) 꿈해몽·사주·타로 풀이와 여행 계획<br>🎱 [`lottolab`](products/lottolab/) 로또·연금복권 회차 데이터와 번호 생성<br>📈 [`stock`](products/stock/) 증권 계좌 대시보드·AI 진단·모의주문<br>🎼 [`humscore`](products/humscore/) 악보·찬양 콘티 저장과 공유 링크 |
+| 🏥 의료(격리형) | 🏥 [`hospital`](products/hospital/) 병원 예약·연락·상담 메모 CRM |
+
+제품마다 들어 있는 파일은 아래와 같습니다.
+
+| 파일 | 내용 |
+|---|---|
+| `user/0001_<slug>.sql` | 개인 소유 안(단일 구조). 본인 행만 접근 |
+| `org/0001_<slug>.sql` | 조직 소유 안(테넌트 구조). 조직 멤버·역할별 접근, 플랜별 기능 잠금 |
+| `*/0002_ai.sql`·`0002_storage.sql`·`app/` | AI 라우팅 시드, Storage 버킷, 앱 전용 표 |
+| `check_*.sql`·`run_check.sh` | 합성 데이터로 격리·권한·잠금을 검사하고 롤백 |
+| `existing.md` | 기존 앱 DB와의 차이와 앱에서 바꿀 코드 |
+| `local-storage.md` | 앱 로컬 저장소와의 동기화 설계 |
+
+## 스키마 대시보드
+
+SQL을 직접 읽지 않아도 각 DB가 하는 일을 볼 수 있는 로컬 화면입니다.
+
+```bash
+python scripts/schema-dashboard.py          # bundles/·content/ → data/schema.json
+cd tools/schema-dashboard/docker && DASHBOARD_PORT=8766 docker compose up -d --build
+```
+
+주소는 http://127.0.0.1:8766 입니다.
+
+| 화면 | 보이는 것 |
+|---|---|
+| 왼쪽 메뉴 | 분류 7개를 접고 펼 수 있습니다. 분류 이름을 누르면 카드 화면, 화살표를 누르면 접기·펴기, 제품 이름을 누르면 상세 화면으로 갑니다. 위에 제품 검색이 있습니다. |
+| 분류 화면 | 제품 카드(아이콘·한 줄 소개·형태·표 수)를 모바일 1열·태블릿 2열·데스크톱 3~4열로 보여 줍니다. |
+| 제품·코어 화면 | 개요, 흐름도와 상태도, FK로 자동 생성한 ERD, SQL 파일별 설명(표·함수·보안 규칙)과 원문, 구조별(기존·단일·테넌트·모노레포·격리형) 표 목록이 있습니다. |
+
+설명 원본은 `tools/schema-dashboard/content/`에 있습니다(형식은 그 폴더의 `README.md`). SQL을 바꾸면 해당 제품 JSON도 함께 고칩니다. 구조도는 Mermaid를 CDN에서 불러오므로, 오프라인에서는 원문 텍스트로 보입니다.
 
 ## 시작하기
 
