@@ -204,4 +204,194 @@ do $$ begin
   if public.nomad_credit_balance((select v::uuid from t_ctx where k = 'team')) <> 0 then raise exception 'viewer balance'; end if;
 end $$;
 
+reset role;
+-- 소셜 로그인 가입 · 사진 · 익명 전환 · 테마
+insert into auth.users (id, email, email_confirmed_at, is_anonymous, raw_user_meta_data) values
+ ('00000000-0000-4000-8000-0000000000b1', 'gina@example.test', now(), false, '{"full_name":"구글 지나","picture":"https://img.example.test/g.png"}'),
+ ('00000000-0000-4000-8000-0000000000b2', null, null, false, '{"nickname":"카카오닉","avatar_url":"https://img.example.test/k.png"}'),
+ ('00000000-0000-4000-8000-0000000000b3', null, null, false, '{"name":"네이버 나","avatar_url":"javascript:alert(1)","picture":"http://img.example.test/n.png"}'),
+ ('00000000-0000-4000-8000-0000000000b4', null, null, true, '{"name":"전환 예정","picture":"https://img.example.test/c.png"}'),
+ ('00000000-0000-4000-8000-0000000000b5', null, null, false, '{"name":"공백 사진","avatar_url":"https://img.example.test/a b.png"}');
+
+do $$
+declare p nomad_core.profiles;
+begin
+  -- 구글: 이메일 앞부분이 full_name보다 우선(기존 규칙 유지), 사진 저장
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b1';
+  if not found or p.display_name is distinct from 'gina' or p.avatar_url is distinct from 'https://img.example.test/g.png' or p.theme is distinct from 'system'
+  then raise exception 'google signup profile wrong: %', p; end if;
+  -- 카카오 무이메일: nickname, avatar_url
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b2';
+  if not found or p.display_name is distinct from '카카오닉' or p.avatar_url is distinct from 'https://img.example.test/k.png'
+  then raise exception 'kakao signup profile wrong: %', p; end if;
+  -- 네이버 메타데이터: name, 잘못된 사진(javascript:, http:)은 무시
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b3';
+  if not found or p.display_name is distinct from '네이버 나' or p.avatar_url is not null
+  then raise exception 'naver signup/avatar sanitize wrong: %', p; end if;
+  select * into p from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b5';
+  if not found or p.display_name is distinct from '공백 사진' or p.avatar_url is not null
+  then raise exception 'avatar with whitespace must be ignored: %', p; end if;
+  -- 익명: 프로필·조직 없음 → 정식 전환 시 같은 프로비저닝
+  if exists (select 1 from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b4')
+  then raise exception 'anonymous must not be provisioned'; end if;
+end $$;
+
+update auth.users set is_anonymous = false, email = 'conv@example.test', email_confirmed_at = now()
+where id = '00000000-0000-4000-8000-0000000000b4';
+do $$
+begin
+  if (select display_name from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b4') is distinct from '전환 예정'
+     or (select avatar_url from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000b4') is null
+     or (select count(*) from nomad_core.memberships m join nomad_core.organizations o on o.id = m.organization_id
+         where m.user_id = '00000000-0000-4000-8000-0000000000b4' and m.role = 'owner' and o.kind = 'personal') <> 1
+  then raise exception 'anonymous upgrade provisioning failed'; end if;
+  -- 다른 컬럼 갱신으로 중복 프로비저닝되지 않음
+  update auth.users set is_anonymous = false where id = '00000000-0000-4000-8000-0000000000b4';
+  if (select count(*) from nomad_core.memberships where user_id = '00000000-0000-4000-8000-0000000000b4') <> 1
+  then raise exception 'duplicate provisioning'; end if;
+end $$;
+
+-- avatar·theme·이름 길이 제약(서버 쓰기 경로)
+select pg_temp.expect_err($q$update nomad_core.profiles set avatar_url = 'javascript:x' where user_id = '00000000-0000-4000-8000-0000000000a1'$q$, '%profiles_avatar_url_check%');
+select pg_temp.expect_err($q$update nomad_core.profiles set theme = 'neon' where user_id = '00000000-0000-4000-8000-0000000000a1'$q$, '%profiles_theme_check%');
+select pg_temp.expect_err($q$update nomad_core.profiles set display_name = repeat('x', 101) where user_id = '00000000-0000-4000-8000-0000000000a1'$q$, '%profiles_display_name_length%');
+
+-- 테마: 본인만, 유효 값만, 테이블 직접 접근 불가
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+do $$
+begin
+  if (select theme from public.nomad_my_profile()) <> 'system' then raise exception 'default theme must be system'; end if;
+  perform public.nomad_set_my_theme('dark');
+  if (select theme from public.nomad_my_profile()) <> 'dark' then raise exception 'theme update failed'; end if;
+  perform pg_temp.expect_err($q$select public.nomad_set_my_theme('neon')$q$, '%invalid theme%');
+  perform pg_temp.expect_err($q$update nomad_core.profiles set theme = 'light' where user_id = '00000000-0000-4000-8000-0000000000a2'$q$, '%permission denied%');
+  perform pg_temp.expect_err($q$select theme from nomad_core.profiles$q$, '%permission denied%');
+end $$;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a2","role":"authenticated"}', true);
+do $$
+begin
+  perform public.nomad_set_my_theme('light');
+end $$;
+reset role;
+do $$
+begin
+  if (select theme from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000a1') <> 'dark'
+     or (select theme from nomad_core.profiles where user_id = '00000000-0000-4000-8000-0000000000a2') <> 'light'
+  then raise exception 'theme isolation failed'; end if;
+end $$;
+
+-- ── 멤버 관리: 내 초대 목록 · 거절 · 역할 변경 · 내보내기 ──
+-- m1 org: a1 owner · a2 admin · a3 editor · a6 viewer (a7 비회원)
+insert into nomad_core.organizations (id, name, kind, created_by) values
+ ('00000000-0000-4000-8000-00000000f001', '멤버 관리 팀', 'team', '00000000-0000-4000-8000-0000000000a1');
+insert into nomad_core.memberships (organization_id, user_id, role) values
+ ('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'owner'),
+ ('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a2', 'admin'),
+ ('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a3', 'editor'),
+ ('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'viewer');
+insert into nomad_core.invitations (id, organization_id, email, role, token) values
+ ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-00000000f001', 'frank@example.test', 'editor', 'tok-m-frank'),
+ ('00000000-0000-4000-8000-00000000e002', '00000000-0000-4000-8000-00000000f001', 'dave@example.test', 'viewer', 'tok-m-dave');
+insert into nomad_core.invitations (id, organization_id, email, role, token, expires_at) values
+ ('00000000-0000-4000-8000-00000000e003', '00000000-0000-4000-8000-00000000f001', 'carol@example.test', 'viewer', 'tok-m-exp', now() - interval '1 minute');
+
+set local role authenticated;
+-- 내 초대 목록: 본인 이메일의 미만료 초대만, 미인증·무인증은 비어 있음
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a7', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a7","role":"authenticated"}', true);
+do $$
+begin
+  if (select count(*) from public.nomad_my_invitations()) <> 1
+     or (select organization_name from public.nomad_my_invitations()) <> '멤버 관리 팀'
+     or (select token from public.nomad_my_invitations()) <> 'tok-m-frank'
+  then raise exception 'my_invitations must show only own unexpired invitation'; end if;
+  perform pg_temp.expect_err($q$select public.nomad_decline_invitation('00000000-0000-4000-8000-00000000e002')$q$, '%email mismatch%');
+end $$;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a4', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a4","role":"authenticated"}', true);
+do $$
+begin
+  if (select count(*) from public.nomad_my_invitations()) <> 0 then raise exception 'unconfirmed email must see no invitations'; end if;
+  perform pg_temp.expect_err($q$select public.nomad_decline_invitation('00000000-0000-4000-8000-00000000e002')$q$, '%email mismatch%');
+end $$;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a3', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a3","role":"authenticated"}', true);
+do $$
+begin
+  if (select count(*) from public.nomad_my_invitations()) <> 0 then raise exception 'other user must see no invitations'; end if;
+end $$;
+select set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claims', '', true);
+select pg_temp.expect_err($q$select public.nomad_decline_invitation('00000000-0000-4000-8000-00000000e001')$q$, '%not authenticated%');
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a7', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a7","role":"authenticated"}', true);
+select public.nomad_decline_invitation('00000000-0000-4000-8000-00000000e001');
+do $$
+begin
+  if (select count(*) from public.nomad_my_invitations()) <> 0 then raise exception 'declined invitation still listed'; end if;
+  perform pg_temp.expect_err($q$select public.nomad_decline_invitation('00000000-0000-4000-8000-00000000e001')$q$, '%invalid invitation%');
+end $$;
+
+-- 역할 변경: editor·viewer·비회원 거부
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a3', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a3","role":"authenticated"}', true);
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'editor')$q$, '%forbidden%');
+select pg_temp.expect_err($q$select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6')$q$, '%forbidden%');
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a7', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a7","role":"authenticated"}', true);
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'editor')$q$, '%forbidden%');
+select pg_temp.expect_err($q$select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a7')$q$, '%forbidden%');
+-- admin: owner 변경·owner 지정·owner 내보내기 거부, 일반 멤버는 허용
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a2","role":"authenticated"}', true);
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'viewer')$q$, '%forbidden%');
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a3', 'owner')$q$, '%forbidden%');
+select pg_temp.expect_err($q$select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1')$q$, '%forbidden%');
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a3', 'boss')$q$, '%invalid role%');
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a7', 'viewer')$q$, '%member not found%');
+select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'editor');
+select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6');
+-- owner: 승격 허용, 마지막 owner 강등·제거·본인 탈퇴 거부
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a3', 'admin');
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'admin')$q$, '%last owner%');
+select pg_temp.expect_err($q$select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1')$q$, '%last owner%');
+-- 두 번째 owner가 생기면 본인 강등·탈퇴 허용
+select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a2', 'owner');
+select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'editor');
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a2","role":"authenticated"}', true);
+select pg_temp.expect_err($q$select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a2')$q$, '%last owner%');
+-- 일반 멤버 본인 탈퇴 허용
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a1","role":"authenticated"}', true);
+select public.nomad_remove_member('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1');
+reset role;
+do $$
+begin
+  if (select string_agg(user_id::text || ':' || role, ',' order by user_id::text)
+      from nomad_core.memberships where organization_id = '00000000-0000-4000-8000-00000000f001')
+     <> '00000000-0000-4000-8000-0000000000a2:owner,00000000-0000-4000-8000-0000000000a3:admin'
+  then raise exception 'member management final state mismatch'; end if;
+end $$;
+
+-- 승격 시 좌석: 대기 초대가 한도를 채우면 viewer→editor 거부
+update nomad_core.organizations set seat_limit = 3 where id = '00000000-0000-4000-8000-00000000f001';
+insert into nomad_core.invitations (organization_id, email, role, token) values
+ ('00000000-0000-4000-8000-00000000f001', 'seatq@example.test', 'editor', 'tok-m-seat');
+insert into nomad_core.memberships (organization_id, user_id, role) values
+ ('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'viewer');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true),
+       set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000a2","role":"authenticated"}', true);
+select pg_temp.expect_err($q$select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'editor')$q$, '%seat limit reached%');
+reset role;
+update nomad_core.organizations set seat_limit = 4 where id = '00000000-0000-4000-8000-00000000f001';
+set local role authenticated;
+select public.nomad_change_member_role('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a6', 'editor');
+reset role;
+
 rollback;

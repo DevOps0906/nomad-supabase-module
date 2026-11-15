@@ -1,0 +1,61 @@
+{
+  "slug": "floria",
+  "icon": "💐",
+  "tagline": "브랜드 사이트 문의·뉴스레터 접수",
+  "overview": "여러 브랜드 사이트가 한 백엔드를 공유하며, 방문자 문의와 뉴스레터 구독(이중 동의)을 받는다. 방문자(anon)는 공개 RPC submit_inquiry로만 쓰고, 뉴스레터 구독·확인·해지와 사이트 등록은 서버(service_role) 전용이다. 조직 멤버는 사이트를 보고, 문의·구독자는 owner·admin·editor만 본다. 기능 site는 A·B 플랜에만 있어 구독이 끊기면(C 취급) 접수·조회·운영이 잠기지만, 개인정보 삭제(delete_inquiry·erase_subscriber)는 잠긴 조직의 owner·admin도 할 수 있다. 0002는 사이트별 AI 상담·음성 스위치를 더한다.",
+  "diagrams": [
+    {
+      "title": "주요 흐름",
+      "mermaid": "flowchart LR\n  V[방문자 anon] --> SI[submit_inquiry]\n  SV[서버 service_role] --> SN[subscribe_newsletter]\n  SV --> CN[confirm_newsletter]\n  SV --> UN[unsubscribe_newsletter]\n  SV --> PS[provision_site]\n  SV --> PE[purge_expired]\n  M[조직 멤버] --> SIS[set_inquiry_status]\n  M --> DI[delete_inquiry]\n  M --> ES[erase_subscriber]\n  M --> USS[update_site_settings]\n  M --> UAI[update_ai_settings]\n  SI --> INQ[(inquiries)]\n  SIS --> INQ\n  DI --> INQ\n  PE --> INQ\n  SN --> NS[(newsletter_subscribers)]\n  CN --> NS\n  UN --> NS\n  ES --> NS\n  PE --> NS\n  PS --> SITES[(sites)]\n  USS --> SITES\n  UAI --> SITES"
+    },
+    {
+      "title": "문의 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> new\n  [*] --> spam: 스팸 점수 60 이상\n  new --> read\n  new --> replied\n  new --> spam\n  new --> archived\n  read --> new\n  read --> replied\n  read --> spam\n  read --> archived\n  replied --> archived\n  archived --> read\n  spam --> new"
+    }
+  ],
+  "files": {
+    "products/floria/org/0001_floria.sql": {
+      "summary": "nomad_floria 스키마와 제품 floria(A·B 플랜에 기능 site)를 등록하고, 사이트·문의·뉴스레터 구독자 3개 표와 공개·서버·운영 RPC를 만든다. 사용자 표 쓰기 권한은 없고 모든 쓰기는 security definer RPC나 service_role로만 한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["sites", "브랜드 사이트 등록부(slug·허용 origin·알림 메일·문의/뉴스레터 수신 여부·문의 보존 일수·동의 문구 버전·active/paused)"],
+          ["inquiries", "방문자 문의(개인정보)와 상태(new·read·replied·archived·spam), 스팸 점수·사유, 담당자 메모"],
+          ["newsletter_subscribers", "뉴스레터 구독자(pending→confirmed→unsubscribed), 사이트별 이메일 해시 유일, 해지 후 이메일을 비우고 해시만 보존"]
+        ]},
+        { "title": "함수(RPC)", "items": [
+          ["submit_inquiry(p_site_slug, p_kind, …)", "방문자 문의 접수(anon 유일한 쓰기 경로). 허니팟·입력 검증·동의 버전(SI004)·요청 제한(SI001은 {ok:false} 반환)·스팸 점수 60 이상이면 spam으로 저장"],
+          ["subscribe_newsletter(p_site_slug, p_email, …)", "서버 전용 구독 신청. pending 행을 만들거나 재발송(최대 5회)하고, 확인 메일 발송 여부를 돌려준다"],
+          ["confirm_newsletter(p_subscriber_id)", "서버 전용, pending 구독을 confirmed로 바꾼다"],
+          ["unsubscribe_newsletter(p_subscriber_id)", "서버 전용, pending·confirmed 구독을 unsubscribed로 바꾼다"],
+          ["set_inquiry_status(p_id, p_to, p_note)", "owner·admin·editor가 문의 상태와 메모를 바꾸고 감사 로그를 남긴다(기능 site 필요)"],
+          ["delete_inquiry(p_id)", "owner·admin·서버가 문의를 삭제한다. 기능 잠금을 보지 않고, 감사 로그에 개인정보를 남기지 않는다"],
+          ["erase_subscriber(p_id)", "owner·admin·서버가 구독자 이메일 원문을 지우고 해지 상태와 해시만 남긴다(기능 잠금 없음)"],
+          ["update_site_settings(p_site_id, …)", "owner·admin이 사이트 이름·알림 메일·수신 여부·동의 문구 버전을 바꾼다(감사 기록)"],
+          ["provision_site(p_organization_id, p_slug, …)", "서버 전용 사이트 등록. 조직에 기능 site가 없으면 거부"],
+          ["purge_expired()", "서버 전용 일일 정리: 보존 기간 지난 문의·30일 지난 spam 삭제, 7일 지난 pending 구독 삭제, 해지 30일 지난 이메일 비움"],
+          ["inquiry_status_transition · newsletter_status_transition (트리거)", "문의·구독 상태 전이 규칙을 검사하고 read_at·confirmed_at 등 시각을 채운다"]
+        ]},
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, authenticated는 SELECT만. sites는 조직 멤버, 문의·구독자는 owner·admin·editor만(viewer 제외)"],
+          ["기능 잠금", "모든 정책·RPC가 floria/site 기능을 검사한다. C 플랜(구독 끊김)에는 site가 없어 잠긴다"],
+          ["anon 노출", "anon은 표 권한이 없고 실행 가능한 함수는 submit_inquiry 하나뿐"],
+          ["요청 제한", "사이트별 시간당 100·일 500, 이메일 해시별 시간당 3·일 6(nomad_core.rate_limit_take)"]
+        ]}
+      ]
+    },
+    "products/floria/org/0002_ai.sql": {
+      "summary": "sites에 AI 상담(accepts_ai_chat)·음성(accepts_voice) 스위치를 더하고, 음성은 상담이 켜져 있을 때만 켜지게 한다. 제품 전용 AI 표는 없고 라우팅 기본값은 주석으로만 남겼다.",
+      "parts": [
+        { "title": "표 변경", "items": [
+          ["sites.accepts_ai_chat · accepts_voice", "기본 false, 음성은 상담이 켜져야만 true 가능(검사 제약)"]
+        ]},
+        { "title": "함수(RPC)", "items": [
+          ["update_ai_settings(p_site_id, p_accepts_ai_chat, p_accepts_voice)", "owner·admin·서버가 스위치를 바꾼다. 상담을 끄면 음성도 함께 꺼지고 감사 로그를 남긴다"]
+        ]}
+      ]
+    },
+    "products/floria/check_org.sql": {
+      "summary": "조직 2곳 교차 접근 거부, 역할별 권한, 공개 RPC, 상태 전이, 기능 잠금(만료·inactive·구독 없음), 개인정보 삭제 허용, AI 스위치를 합성 데이터로 검사하고 롤백한다."
+    }
+  }
+}

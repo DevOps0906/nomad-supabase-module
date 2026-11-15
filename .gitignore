@@ -17,3 +17,6 @@ node_modules/
 *.pfx
 id_rsa*
 id_ed25519*
+bundles/
+tools/schema-dashboard/data/
+__pycache__/

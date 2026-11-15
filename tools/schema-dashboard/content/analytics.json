@@ -1,0 +1,66 @@
+{
+  "slug": "analytics",
+  "icon": "📊",
+  "tagline": "데이터셋 업로드부터 분석·보고서까지",
+  "overview": "조직의 owner·admin(관리)·editor(편집)·멤버(읽기)가 쓰는 데이터 분석 작업 공간이다. 프로젝트·업로드 데이터셋과 버전, 7단계 분석 실행과 단계 결과, 정제 제안·변경 기록, 대시보드·보고서, 자동화 파이프라인·예약, 질문 기록·알림·공유 링크를 담는다. data_analysis는 전 플랜, automation은 A·B, share_links는 A이며 구독이 끊기면 자동화·새 공유가 AN002로 잠기고 읽기·기존 공유 열람·공유 해제·자동화 끄기는 유지된다. 대부분의 결과 표는 서버만 쓰고, 원본 데이터셋 버전은 불변이며, anon은 공개 RPC get_shared_report 하나로만 공유 보고서를 읽는다.",
+  "diagrams": [
+    {
+      "title": "역할별 흐름",
+      "mermaid": "flowchart LR\n  Editor[편집자 owner·admin·editor] --> PJ[projects]\n  Editor --> DS[datasets]\n  Editor --> DV[\"dataset_versions(raw v1)\"]\n  Editor --> AR[\"analysis_runs(수동)\"]\n  Editor --> RSec[\"report_sections(chart만)\"]\n  Server[분석 서버 service_role] --> RS[run_steps]\n  Server --> CP[cleaning_proposals · change_logs]\n  Server --> DB[dashboards · widgets]\n  Server --> RP[reports]\n  Server --> PL[pipelines · schedules]\n  Server --> NT[notifications]\n  Admin[owner·admin] --> CRS[create_report_share]\n  CRS --> SH[report_shares]\n  Admin --> PWT[pipeline_webhook_token]\n  PWT --> PL\n  Anon[외부 열람자 anon] --> GSR[get_shared_report]\n  GSR --> SH\n  GSR --> RP"
+    }
+  ],
+  "files": {
+    "products/analytics/org/0001_analytics.sql": {
+      "summary": "nomad_analytics 스키마와 analytics 제품·플랜(A/B/C)·기능(data_analysis·automation·share_links)을 등록한다. 17개 표와 권한 도우미·서버 쓰기 가드 트리거·사용자 RPC·공개 공유 RPC, analytics-datasets·analytics-reports 버킷과 Realtime 구독을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["projects", "분석 프로젝트, 이름은 편집자·상태와 목표는 서버·삭제는 owner·admin"],
+            ["datasets", "업로드 파일(CSV·엑셀), 프로젝트당 개수는 plan_limits max_files_per_project(키 없으면 0)"],
+            ["dataset_versions", "데이터셋 버전(raw·cleaned), 사용자는 raw v1만 넣고 수정·삭제 없음"],
+            ["analysis_runs", "7단계 분석 실행, 편집자는 수동 실행만 만들고 예약·웹훅 실행은 automation 기능"],
+            ["run_steps", "실행 단계별 결과(서버 기록)"],
+            ["cleaning_proposals", "정제 제안, 생성·결정 반영은 서버"],
+            ["change_logs", "정제 변경 기록(서버)"],
+            ["dashboards", "실행 결과 대시보드(서버 생성)"],
+            ["widgets", "대시보드 위젯(서버)"],
+            ["reports", "분석 보고서(서버), 파일은 analytics-reports 버킷"],
+            ["report_sections", "보고서 섹션, 편집자는 content.chart(그래프 유형)만 변경"],
+            ["pipelines", "프로젝트당 자동화 파이프라인 1개, 켜기·끄기는 편집자, webhook_token은 SELECT 제외"],
+            ["schedules", "파이프라인 예약(서버)"],
+            ["usage_events", "AI 호출 등 사용량 기록(서버), 한도는 plan_limits ai_calls_per_day"],
+            ["questions", "질문 창 기록(답변은 서버 계산), 고정·삭제는 편집자"],
+            ["report_shares", "보고서 읽기 전용 공유 링크, owner·admin만 읽기, 쓰기는 RPC"],
+            ["notifications", "사용자별 알림(서버 생성), 본인 행만 읽고 read_at만 변경"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["create_report_share(p_report_id, p_expires_at)", "owner·admin이 공유 링크 생성, share_links 없으면 AN002"],
+            ["revoke_report_share(p_share_id)", "owner·admin이 공유 해제, 구독이 끊겨도 가능"],
+            ["pipeline_webhook_token(p_project_id)", "owner·admin이 웹훅 토큰 조회, automation 없으면 AN002"],
+            ["get_shared_report(share_token)", "anon 공개 RPC, 토큰 형식 검사 후 공개 컬럼만 반환, 해제·만료·조직 비활성은 null"],
+            ["has_access / can_edit / can_manage(target_organization)", "정책용 도우미: 읽기·편집·관리 판정"],
+            ["org_feature / limit_of / new_token", "서버·트리거 전용 기능 판정·수량 한도·URL 토큰 생성"],
+            ["내부 트리거", "updated_at 갱신, 서버 기록 표 사용자 쓰기 거부, 파일 한도(AN001), 참조 데이터셋 삭제 거부(23503), raw 경로 강제, 실행 데이터셋 조직·프로젝트 일치(AN003), 섹션 chart만 변경, 알림 읽음 시각"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, 남의 조직 행은 존재도 알리지 않음(P0002), anon 표 권한 0"],
+            ["구독 끊김", "자동화·새 공유만 잠기고 읽기·기존 공유 열람·공유 해제·자동화 끄기는 유지"],
+            ["analytics-datasets 버킷", "비공개 50MB, 경로 <organization_id>/analytics/, 편집자 raw 서명 업로드·정제본은 서버, 기록된 파일 삭제 우회 차단"],
+            ["analytics-reports 버킷", "비공개 50MB, HTML·PDF·DOCX는 서버, 지우기는 owner·admin"],
+            ["Realtime", "projects·analysis_runs·run_steps·cleaning_proposals·notifications 진행 상태·알림 푸시(RLS 적용)"]
+          ]
+        }
+      ]
+    },
+    "products/analytics/check_org.sql": {
+      "summary": "합성 데이터로 조직 간 교차 접근 0, anon 표 접근 0, 역할별 쓰기 범위, 원본 불변·경로 접두, 파일 한도, 공유·웹훅 RPC, 구독 끊김, 연쇄 삭제, Storage를 검사하고 rollback한다."
+    }
+  }
+}

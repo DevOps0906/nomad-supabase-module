@@ -1,0 +1,107 @@
+{
+  "slug": "knowflow",
+  "icon": "📚",
+  "tagline": "자료를 모아 묻고 보고서를 만드는 지식 DB",
+  "overview": "프로젝트에 PDF·URL·유튜브 자료를 모으고, 워커가 청크·장면 카드로 쪼갠 뒤 대화(질문·답변)와 보고서를 만든다. 조직형(org)은 조직 멤버가 읽고 owner·admin·editor만 RPC로 쓰며, 사용자형(user)은 본인 소유만 다룬다. 사용자 롤은 SELECT만 있고 모든 쓰기는 SECURITY DEFINER RPC로만 하며, 질문·답변·보고서 생성은 서버(service_role)도 표에 직접 넣지 못한다. 한도는 nomad_core.plan_limits(knowflow)의 프로젝트 수·프로젝트당 자료 수·월 질문·보고서·자료 작업·영상 초로 막고(KF429), 기능 잠금은 knowledge_base·knowledge_chat·space_reports(KF403)다. 결제성 요청(자료 등록·질문·보고서)은 멱등 키로 중복 차감을 막는다.",
+  "diagrams": [
+    {
+      "title": "주요 흐름",
+      "mermaid": "flowchart LR\n  U[사용자] --> CP[create_project]\n  U --> RP[register_pdf_source]\n  SV[서버] --> RY[register_youtube_source]\n  U --> AQ[ask_question]\n  SV --> SA[save_answer]\n  U --> CR[create_report]\n  CP --> PJ[(projects)]\n  RP --> SR[(sources)]\n  RY --> SR\n  RP --> JB[(processing_jobs)]\n  RY --> JB\n  CR --> RE[(reports)]\n  CR --> JB\n  AQ --> MS[(messages)]\n  SA --> MS\n  AQ --> QT[(quotas)]\n  CR --> QT\n  W[워커] --> CJ[claim_job]\n  CJ --> JB\n  W --> RC[replace_source_chunks]\n  RC --> CH[(source_chunks)]\n  W --> RM[replace_source_moments]\n  RM --> MO[(source_moments)]"
+    },
+    {
+      "title": "작업 상태",
+      "mermaid": "stateDiagram-v2\n  [*] --> queued\n  queued --> running: claim_job\n  running --> succeeded: complete_job\n  running --> queued: fail_job 재시도 가능\n  running --> failed: fail_job 최종 실패\n  succeeded --> [*]\n  failed --> [*]"
+    }
+  ],
+  "files": {
+    "products/knowflow/org/0001_knowflow.sql": {
+      "summary": "조직형 KNOWFLOW 스키마 nomad_knowflow·nomad_knowflow_private를 만든다. 모든 표는 organization_id로 조직에 묶이고, 읽기는 조직 멤버, 쓰기는 owner·admin·editor만 RPC로 한다. 워커용 작업 큐 RPC와 월 쿼터·멱등 키·기능 잠금이 함께 들어 있다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["org_quotas", "조직별 이번 달 질문·보고서·자료 작업·영상 초 사용량 누적(한도는 plan_limits)"],
+          ["projects", "지식 프로젝트(이름·설명·요약·추천 질문, 보관·소프트 삭제)"],
+          ["sources", "자료(pdf·url·youtube)와 처리 상태(queued→processing→completed/failed), 유튜브 메타데이터·차감한 영상 초"],
+          ["source_chunks", "자료를 쪼갠 청크 본문·위치·전문 검색 색인, 사용자 직접 접근 없음"],
+          ["source_moments", "유튜브 장면 카드(시작·끝 초, 제목·설명), 쓰기는 워커 RPC만"],
+          ["conversations", "프로젝트 안의 대화(제목, 소프트 삭제)"],
+          ["messages", "대화 메시지(user 질문·assistant 답변), 질문 1개당 답변 1개"],
+          ["reports", "보고서(markdown, generating→ready/failed)와 월 보고서 차감 표식"],
+          ["report_citations", "보고서가 인용한 청크와 순서(청크가 지워지면 null)"],
+          ["processing_jobs", "작업 큐(source_ingest·report_generate·source_recheck), 잠금 기한·하트비트·시도 횟수"],
+          ["usage_events", "AI 사용 기록(모델·토큰·원 단위 예상 비용)"],
+          ["nomad_knowflow_private.idempotency_keys", "조직별 멱등 키와 요청 해시·만든 자원"],
+          ["nomad_knowflow_private.auth_rate_limits", "로그인·가입·재설정 요청 한도 카운터(고정 윈도, 해시 키만)"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["consume_auth_rate_limit(p_scope, p_key_hash)", "anon도 호출, login_ip·login_email·signup_ip·reset_ip·reset_email별 요청 한도 판정"],
+          ["create_project(p_organization_id, p_name, p_description)", "쓰기 권한 확인 후 max_projects 한도 안에서 프로젝트 생성"],
+          ["update_project(p_id, p_patch)", "name·description·archived만 고친다"],
+          ["delete_project(p_id)", "진행 중 작업이 있으면 KF409, 없으면 소프트 삭제"],
+          ["register_pdf_source(p_project_id, …)", "knowledge_base 잠금·저장 경로 확인 후 멱등 키·자료 수 한도·쿼터를 거쳐 PDF 자료와 처리 작업 생성"],
+          ["register_youtube_source(p_organization_id, …)", "service_role 전용, 서버가 확인한 유튜브 영상을 자료 수·영상 길이 한도 안에서 등록"],
+          ["get_source_chunks(p_source_id, …)", "자료 청크를 페이지 단위 또는 특정 청크 주변으로 읽는다(최대 100개)"],
+          ["delete_sources(p_project_id, p_source_ids)", "같은 프로젝트의 자료 1~100개 삭제"],
+          ["retry_source(p_source_id, p_idempotency_key, p_request_hash)", "실패한 자료 처리를 멱등 키로 다시 큐에 넣는다"],
+          ["list_project_jobs(p_project_id, …)", "프로젝트 작업 목록을 상태 필터·커서로 조회(invoker)"],
+          ["claim_job·heartbeat_job·progress_job·complete_job·fail_job", "service_role 워커가 작업을 잡고 시도 번호(펜싱)로 진행·완료·실패를 기록"],
+          ["replace_source_chunks·replace_source_moments", "워커가 처리 결과 청크·장면 카드를 통째로 바꾼다"],
+          ["sweep_source_rechecks(p_limit)", "오래된 유튜브 메타데이터를 지우고 재확인 작업을 넣는다"],
+          ["apply_source_recheck(p_job_id, p_attempt, p_result)", "재확인 결과(available·unavailable·missing)를 자료에 반영"],
+          ["ask_question(p_conversation_id, p_content, p_idempotency_key)", "knowledge_chat 잠금 → 멱등 키 → monthly_questions 차감 → 질문 저장"],
+          ["save_answer(p_question_id, p_content, p_citation_metadata)", "service_role 전용, 질문에 AI 답변 1개를 붙인다"],
+          ["create_report(p_project_id, p_title, p_idempotency_key)", "space_reports 잠금 → 멱등 키 → monthly_reports 차감 → 보고서(generating)와 생성 작업"],
+          ["내부 함수(nomad_knowflow_private)", "한도 조회·쓰기 권한·기능 잠금·쿼터 차감과 환불·멱등 키·만료 작업 회수·작업 등록, 누구에게도 EXECUTE 없음"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 사용자 롤은 같은 조직 멤버 행 SELECT만"],
+          ["직접 접근 거부", "source_chunks·멱등 키·요청 한도 표는 anon·authenticated 모두 거부"],
+          ["RPC 전용 쓰기", "service_role도 messages insert·update, reports insert 권한 없음"],
+          ["기능 잠금", "대화·질문·보고서 insert 트리거가 knowledge_chat·space_reports를 마지막으로 확인"],
+          ["쿼터", "조건부 UPDATE 한 문장으로 차감해 동시 요청에도 초과 불가, 실패한 보고서는 차감 표식이 있을 때만 1회 환불"]
+        ] }
+      ]
+    },
+    "products/knowflow/org/0002_storage.sql": {
+      "summary": "비공개 Storage 버킷 knowflow-sources(PDF만, 50MB)를 만든다. 경로 첫 폴더가 organization_id이고, 읽기는 조직 멤버, 업로드는 owner·admin·editor만 한다. 수정·삭제 정책은 없어 삭제는 서버가 service_role로 한다.",
+      "parts": [
+        { "title": "보안·잠금 규칙", "items": [
+          ["knowflow_sources_objects_select_org", "첫 폴더 조직의 멤버만 읽기(uuid가 아니면 거부)"],
+          ["knowflow_sources_objects_insert_org", "첫 폴더 조직의 owner·admin·editor만 업로드"]
+        ] }
+      ]
+    },
+    "products/knowflow/user/0001_knowflow.sql": {
+      "summary": "사용자형 KNOWFLOW 스키마를 만든다. 표 구성은 조직형과 같고 소유가 user_id(auth.users)이며 본인 행만 읽는다. 한도는 제품 기본 플랜(C)의 plan_limits로 읽고, 기능 잠금은 사용자가 owner인 활성 조직 중 하나라도 기능이 열려 있는지로 판정한다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["user_quotas", "사용자별 이번 달 사용량 누적(조직형 org_quotas 대응)"],
+          ["projects·sources·source_chunks·source_moments", "조직형과 같은 프로젝트·자료·청크·장면 카드, user_id 소유"],
+          ["conversations·messages", "대화와 질문·답변 메시지"],
+          ["reports·report_citations", "보고서와 인용 청크"],
+          ["processing_jobs·usage_events", "작업 큐와 AI 사용 기록"],
+          ["nomad_knowflow_private.idempotency_keys·auth_rate_limits", "멱등 키와 인증 요청 한도 카운터"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["create_project(p_name, p_description)", "조직 인자 없이 본인 소유 프로젝트 생성(max_projects 한도)"],
+          ["나머지 RPC", "update·delete_project, 자료 등록·삭제·재시도, 작업 큐, ask_question·save_answer·create_report가 조직형과 같은 이름·권한으로 있다"],
+          ["내부 함수(nomad_knowflow_private)", "limit_of(C 플랜 한도)·require_feature(사용자 id 기준)·쿼터·멱등 키 등, EXECUTE 없음"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["본인 격리", "모든 표 RLS, 본인 소유 행 SELECT만"],
+          ["RPC 전용 쓰기", "조직형과 같이 질문·답변·보고서 생성은 서버도 표에 직접 쓰지 못한다"]
+        ] }
+      ]
+    },
+    "products/knowflow/user/0002_storage.sql": {
+      "summary": "비공개 Storage 버킷 knowflow-sources(PDF, 50MB)를 만들고 경로 첫 폴더가 본인 user_id일 때만 읽기·업로드를 허용한다. 수정·삭제 정책은 없다.",
+      "parts": [
+        { "title": "보안·잠금 규칙", "items": [
+          ["knowflow_sources_objects_select_own·insert_own", "첫 폴더 = 본인 user_id인 객체만 읽기·업로드"]
+        ] }
+      ]
+    },
+    "products/knowflow/check_prelude.sql": { "summary": "검사 공통 준비: 기존 nomad_knowflow 제거, touch_updated_at 임시 정의, 검사용 제품·플랜·한도 시드와 보조 함수를 둔다(run_check.sh가 이식 SQL 앞에 붙인다)." },
+    "products/knowflow/check_org.sql": { "summary": "조직형 검사: 조직 2곳 교차 접근 거부, owner·viewer 역할, 한도·동기화 컬럼·워커 흐름을 확인하고 rollback한다." },
+    "products/knowflow/check_user.sql": { "summary": "사용자형 검사: 합성 사용자 2명 교차 접근 거부, 한도·동기화 컬럼·워커 흐름을 확인하고 rollback한다." }
+  }
+}

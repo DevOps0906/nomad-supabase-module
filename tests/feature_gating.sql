@@ -200,9 +200,53 @@ exception when insufficient_privilege then null; end $$;
 reset role;
 set local role service_role;
 select set_config('request.jwt.claims', '', true);
+select set_config('request.jwt.claim.sub', '', true);
+select pg_temp.eq((auth.uid() is null)::int, 1, '서버 문맥 uid 없음');
 select pg_temp.eq(nomad_core.org_has_feature('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'blog_core')::int, 1, 'service_role 구독 없음 C 열림');
 select pg_temp.eq(nomad_core.org_has_feature('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'publish_automation')::int, 0, 'service_role 구독 없음 B 잠김');
 select pg_temp.eq(nomad_core.org_has_feature('00000000-0000-4000-8000-0000000003b3', 'contentflow', 'quality_review')::int, 1, 'service_role A 구독 A 열림');
+
+-- 7. plan_limits (task-006) -------------------------------------------------------
+-- 합성 한도: contentflow C=10 · B=100 · A=무제한(2147483647) / humscore B=7
+reset role;
+set local role service_role;
+select set_config('request.jwt.claims', '', true);
+select set_config('request.jwt.claim.sub', '', true);
+select pg_temp.eq((auth.uid() is null)::int, 1, '서버 문맥 uid 없음');
+select pg_temp.eq(pg_temp.rows($q$insert into nomad_core.plan_limits values
+  ('contentflow','C','posts',10), ('contentflow','B','posts',100), ('contentflow','A','posts',2147483647),
+  ('humscore','B','scores',7)$q$), 4, 'service_role plan_limits insert');
+select pg_temp.expect_err($q$insert into nomad_core.plan_limits values ('contentflow','C','bad',-1)$q$, '%plan_limits%');
+select pg_temp.expect_err($q$insert into nomad_core.plan_limits values ('contentflow','C','Bad-Key',1)$q$, '%plan_limits%');
+select pg_temp.expect_err($q$insert into nomad_core.plan_limits values ('contentflow','C','1x',1)$q$, '%plan_limits%');
+
+-- service_role(claims 없이): 실제 값
+select pg_temp.eq(nomad_core.org_plan_limit('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'posts'), 10, 'service 구독 없음 → C');
+select pg_temp.eq(nomad_core.org_plan_limit('00000000-0000-4000-8000-0000000003b2', 'contentflow', 'posts'), 100, 'service B');
+select pg_temp.eq(nomad_core.org_plan_limit('00000000-0000-4000-8000-0000000003b3', 'contentflow', 'posts'), 2147483647, 'service A 무제한');
+select pg_temp.eq((select (nomad_core.org_plan_limit('00000000-0000-4000-8000-0000000003c5', 'humscore', 'scores') is null)::int), 1, 'service 비활성 조직 null');
+
+-- 멤버 authenticated(o1 owner = u1)
+reset role;
+set local role authenticated;
+select pg_temp.as_user('00000000-0000-4000-8000-0000000003a1');
+select pg_temp.eq(nomad_core.plan_limit('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'posts'), 10, '멤버 구독 없음 → C');
+select pg_temp.eq(nomad_core.plan_limit('00000000-0000-4000-8000-0000000003b2', 'contentflow', 'posts'), 100, '멤버 B 활성 → B');
+select pg_temp.eq(nomad_core.plan_limit('00000000-0000-4000-8000-0000000003b4', 'contentflow', 'posts'), 10, '멤버 만료 → C');
+select pg_temp.eq(nomad_core.plan_limit('00000000-0000-4000-8000-0000000003b5', 'contentflow', 'posts'), 10, '멤버 미래 시작 → C');
+select pg_temp.eq((select (nomad_core.plan_limit('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'nokey') is null)::int), 1, '키 없음 null');
+-- 비멤버(u5)
+select pg_temp.as_user('00000000-0000-4000-8000-0000000003a5');
+select pg_temp.eq((select (nomad_core.plan_limit('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'posts') is null)::int), 1, '비멤버 null');
+-- 비활성 조직 멤버(u4, c5): plan_limit도 null
+select pg_temp.as_user('00000000-0000-4000-8000-0000000003a4');
+select pg_temp.eq((select (nomad_core.plan_limit('00000000-0000-4000-8000-0000000003c5', 'humscore', 'scores') is null)::int), 1, '비활성 조직 plan_limit null');
+-- authenticated는 org_plan_limit·plan_limits 직접 접근 불가
+do $$ begin
+  perform nomad_core.org_plan_limit('00000000-0000-4000-8000-0000000003b1', 'contentflow', 'posts');
+  raise exception 'authenticated가 org_plan_limit을 실행함';
+exception when insufficient_privilege then null; end $$;
+select pg_temp.expect_err($q$select * from nomad_core.plan_limits$q$, '%permission denied%');
 
 reset role;
 rollback;

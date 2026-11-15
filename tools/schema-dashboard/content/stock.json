@@ -1,0 +1,121 @@
+{
+  "slug": "stock",
+  "icon": "📈",
+  "tagline": "증권 계좌 대시보드·AI 진단·모의주문",
+  "overview": "증권사 계좌를 연결해 잔고·보유 종목·체결을 동기화하고, AI 진단 리포트와 모의투자 주문을 다루는 DB다. 조직형(org)은 조직 멤버가, 개인형(user)은 본인이 자기 행만 보며 개인형도 크레딧·자격 증명·감사는 사용자의 개인 조직(kind personal)을 쓴다. 모든 도메인 읽기는 기능 stock/dashboard(A·B 플랜) + 베타 접근이 있어야 열리고, 구독이 끊기거나 베타가 회수되면 0행이 된다. 동기화 결과·리포트·주문 생성은 service_role만 쓰고 사용자가 직접 쓰는 표는 trade_notes(메모)뿐이다. 증권사 키는 nomad_core.provider_credentials에만 두고 계좌번호는 마스킹+해시로만 저장하며, 모의주문은 env=paper만 허용되고 만든 사람이 60초 안에 직접 확인해야 한다.",
+  "diagrams": [
+    {
+      "title": "모의주문 흐름",
+      "mermaid": "flowchart LR\n  SV[서버 service_role] --> CPO[create_paper_order]\n  U[사용자] --> CF[confirm_paper_order]\n  U --> EK[engage_kill_switch]\n  U --> SOL[set_order_limits]\n  W[워커] --> AOU[apply_order_update]\n  SCH[스케줄 1분] --> EPO[expire_pending_orders]\n  CPO --> OR[(order_requests)]\n  CF --> OR\n  AOU --> OR\n  EPO --> OR\n  EK --> KS[(kill_switches)]\n  EK --> OR\n  SOL --> OL[(order_limits)]\n  CPO --> OL\n  CPO --> KS\n  OR --> OE[(order_events)]"
+    },
+    {
+      "title": "주문 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> pending_confirm\n  [*] --> blocked\n  pending_confirm --> confirmed\n  pending_confirm --> expired\n  pending_confirm --> canceled\n  pending_confirm --> blocked\n  confirmed --> submitted\n  confirmed --> blocked\n  confirmed --> failed\n  submitted --> accepted\n  submitted --> rejected\n  submitted --> failed\n  accepted --> partially_filled\n  accepted --> filled\n  accepted --> canceled\n  accepted --> rejected\n  partially_filled --> partially_filled\n  partially_filled --> filled\n  partially_filled --> canceled"
+    }
+  ],
+  "files": {
+    "products/stock/org/0001_stock.sql": {
+      "summary": "조직형 nomad_stock 스키마를 만든다. 제품 stock과 A·B·C 플랜, 기능(dashboard·ai_compare·ideas·leaderboard·paper_orders), 증권사 제공자(kis·kiwoom·hana)를 등록하고 19개 표·RLS·RPC를 만든다. 도메인 표는 organization_id로 격리된다.",
+      "parts": [
+        { "title": "플랜·기능", "items": [
+          ["A 플랜", "dashboard·ai_compare·ideas·leaderboard·paper_orders 전부"],
+          ["B 플랜", "dashboard만(원본 beta 대응)"],
+          ["C 플랜", "기능 없음, 대시보드 전체 잠김"],
+          ["plan_limits 키", "ai_diagnosis_per_day·broker_connections_max·history_days·monthly_credits(수치 시드 안 함)"]
+        ] },
+        { "title": "표", "items": [
+          ["beta_invites", "베타 초대(토큰은 sha256만, 상태 issued→accepted/revoked/expired), service_role 전용"],
+          ["beta_access", "조직별 베타 접근(active↔revoked), 회수하면 모든 도메인 정책이 0행"],
+          ["instruments", "종목 마스터(전역), 이용 가능한 조직이 있는 사용자만 읽기"],
+          ["fundamentals", "재무지표(출처·기준일), 전역 읽기 전용"],
+          ["daily_prices", "일봉(성과 계산 전용), 시세 재배포 제한으로 service_role만"],
+          ["market_calendar", "장 운영 캘린더(전역)"],
+          ["broker_connections", "증권사 연결(계좌는 마스킹+HMAC 해시, 키는 provider_credentials id), 해시·키 id 컬럼은 사용자 권한 없음"],
+          ["balance_snapshots", "잔고 스냅샷(원 단위 정수)"],
+          ["holdings", "보유 종목(동기화 결과)"],
+          ["trades", "체결 내역(broker_exec_id로 멱등)"],
+          ["trade_notes", "체결 메모, 사용자가 직접 쓰는 유일한 도메인 표(소프트 삭제 deleted_at)"],
+          ["ai_reports", "AI 진단·아이디어·리서치·브리핑 리포트(request_id 멱등, 크레딧은 nomad_core.consume_credits 원장 연결)"],
+          ["ai_report_items", "리포트의 종목별 위험도·비중·근거 항목"],
+          ["idea_evaluations", "아이디어 성과(5·20·60일), leaderboard 기능이 열린 조직만 읽기"],
+          ["consents", "투자 고지·국외 이전·모의주문 위험·음성 처리 동의(append-only)"],
+          ["order_limits", "조직별 모의주문 한도(1회·일일 금액, 일일 건수, 비중, 가격 괴리, 시세 나이), 플랫폼 상한은 CHECK"],
+          ["kill_switches", "킬 스위치(전역 > 조직 > 연결), 범위별 활성 1개"],
+          ["order_requests", "모의주문(env=paper·지정가만, client_order_id 멱등, 60초 확인 기한)"],
+          ["order_events", "주문 이벤트 로그(append-only)"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["redeem_beta_invite(p_token_hash, p_user_id)", "service_role이 초대를 수락 처리하고 개인 조직에 베타 접근을 연다. 이메일 불일치·미인증은 ST031·ST032"],
+          ["revoke_beta_access(p_organization_id, p_reason)", "service_role이 베타 접근을 회수"],
+          ["record_consent(p_organization_id, p_kind, p_version)", "본인 동의 기록(베타 접근 조직만), 같은 버전 재동의는 기존 행 반환"],
+          ["set_order_limits(p_organization_id, …)", "모의주문 한도 설정, owner/admin(이용 가능 조직)만"],
+          ["engage_kill_switch(p_organization_id, p_connection_id, p_reason)", "멤버 누구나 구독·베타와 무관하게 작동, 대기·확인 주문을 즉시 blocked로"],
+          ["release_kill_switch(p_switch_id)", "수동 조직·연결 스위치는 owner/admin, 자동·운영·전역은 service_role만 해제"],
+          ["create_paper_order(…)", "service_role이 주문 생성. paper_orders 기능 필요(ST040), 한도·킬 스위치·시세 지연은 blocked 행으로 남김"],
+          ["confirm_paper_order(p_order_id)", "주문을 만든 사용자 본인 세션만 60초 안에 확인(service_role 실행 권한 없음)"],
+          ["apply_order_update(…)", "워커가 증권사 응답을 반영, submitted 직전 킬 스위치 재확인"],
+          ["expire_pending_orders()", "확인 대기 만료 처리(스케줄 매 1분, service_role)"],
+          ["has_stock_access(p_organization) · has_any_stock_access()", "RLS 판정: 멤버 + stock/dashboard + 베타 접근"],
+          ["내부 도우미·트리거", "is_trading_blocked·order_eligible·revoke_if_credential_revoked, 상태 전이 강제·append-only·키/원장 같은 조직 검사 트리거"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 도메인 읽기는 has_stock_access(organization_id)"],
+          ["쓰기 제한", "사용자 쓰기는 trade_notes(작성자 본인, 삭제는 본인 또는 owner/admin)뿐, 나머지는 service_role"],
+          ["모의주문 전용", "order_requests.env는 paper만, 실전 주문 행 불가, orders_enabled는 paper 연결만"],
+          ["키 검사", "연결의 credential은 같은 조직·같은 증권사·폐기 안 된 키만(ST050), 폐기되면 사용 시점에 연결을 revoked로"],
+          ["AI 출력 검사", "succeeded 리포트는 advice_check 통과 필수, 목표가 표현 금지 CHECK"],
+          ["Realtime", "holdings·balance_snapshots·ai_reports·order_requests·broker_connections(공개 컬럼만) 발행"]
+        ] }
+      ]
+    },
+    "products/stock/org/0002_ai.sql": {
+      "summary": "AI 대화·음성 질의·브리핑 낭독 기능을 A·B 플랜에 열고, stock 제품의 AI 라우팅 기본값(nomad_core.ai_routing_settings)을 넣는다. 제품 AI 표는 없고 코어 AI 계층을 그대로 쓴다.",
+      "parts": [
+        { "title": "기능", "items": [
+          ["ai_chat · voice_chat · briefing", "A·B 플랜에 열림, C는 잠김"],
+          ["plan_limits 키", "ai_chat_turns_per_day·ai_research_per_day(수치 시드 안 함)"]
+        ] },
+        { "title": "라우팅 기본값", "items": [
+          ["stock.research·chat·stock.diagnosis", "LLM, anthropic→openai→google→oss-llm 순"],
+          ["stock.advice_check·wiki.*", "LLM, oss-llm 우선 후 anthropic"],
+          ["dify.aux · stock.knowledge", "오픈소스 전용(oss-llm, oss-embed)"],
+          ["voice_chat · briefing", "STT/TTS, oss-voice·elevenlabs"],
+          ["체인 검사", "제공자 존재·종류·오픈소스 모드 위반이면 적용 실패"]
+        ] }
+      ]
+    },
+    "products/stock/user/0001_stock.sql": {
+      "summary": "개인형 nomad_stock 스키마를 만든다. 표 구성은 조직형과 같고 소유 키가 user_id(auth.users)이며 RLS는 user_id = auth.uid()다. 기능 판정·크레딧·자격 증명은 사용자의 개인 조직(personal_organization)으로 본다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["조직형과 같은 19개 표", "beta_invites~order_events, organization_id 대신 user_id 소유"],
+          ["kill_switches", "범위가 global·user·connection"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["record_consent(p_kind, p_version)", "본인 동의 기록(베타 접근 필요)"],
+          ["set_order_limits(…)", "본인 한도 설정(베타 접근 필요)"],
+          ["engage_kill_switch(p_connection_id, p_reason)", "본인 킬 스위치 작동, 구독·베타와 무관"],
+          ["release_kill_switch(p_switch_id)", "본인이 수동으로 켠 사용자·연결 스위치만 해제"],
+          ["confirm_paper_order(p_order_id)", "주문을 만든 본인만 60초 안에 확인"],
+          ["redeem_beta_invite · revoke_beta_access(p_user_id, …) · create_paper_order · apply_order_update · expire_pending_orders", "service_role 전용, 조직형과 같은 역할"],
+          ["has_stock_access(p_user) · my_feature(p_feature)", "RLS 판정: 본인 + 개인 조직 이용권 + 베타 접근"],
+          ["내부 도우미", "personal_organization·user_feature는 실행 권한 없음(정의자 함수 안에서만)"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["본인 격리", "모든 표 RLS, 도메인 읽기는 has_stock_access(user_id)"],
+          ["잠금", "개인 조직의 org_has_feature('stock', …), 구독이 끊기면 전체 0행"],
+          ["쓰기 제한", "사용자 쓰기는 trade_notes 본인 행뿐"]
+        ] }
+      ]
+    },
+    "products/stock/user/0002_ai.sql": {
+      "summary": "조직형 0002_ai.sql과 같은 내용이다. ai_chat·voice_chat·briefing을 A·B 플랜에 열고 stock AI 라우팅 기본값을 넣는다."
+    },
+    "products/stock/check_org.sql": {
+      "summary": "조직형 검사: 조직 2곳 교차 접근 거부·anon 0·역할별 쓰기·베타 게이트·구독 잠김·모의주문(멱등·확인·킬 스위치)·append-only·크레딧 연결·AI 라우팅을 합성 데이터로 확인하고 rollback."
+    },
+    "products/stock/check_user.sql": {
+      "summary": "개인형 검사: 사용자 2명 교차 접근 거부·anon 0·베타 게이트·개인 조직 구독 잠김·모의주문(본인 확인·킬 스위치)·append-only·크레딧·AI 라우팅을 확인하고 rollback."
+    }
+  }
+}

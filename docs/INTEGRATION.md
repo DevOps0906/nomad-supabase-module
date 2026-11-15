@@ -16,15 +16,47 @@ npx supabase db reset --local
 psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 ```
 
+## 번들(새 프로젝트에 바로 적용)
+`bash scripts/build-bundles.sh`가 `bundles/`(git 제외 생성물)를 만든다. 각 번들의 `README.md`가 적용 순서(`supabase link` → `supabase db push`)·확장·워커 역할을 안내한다.
+
+| 구조 | 경로 | 내용 |
+|---|---|---|
+| 단일 | `bundles/single/<제품>/` | core + `products/` 전 제품(hospital 제외) 각각 · user안(없으면 org안) |
+| 테넌트 | `bundles/tenant/<제품>/` | core + 같은 제품 · org안 |
+| 모노레포 | `bundles/monorepo/` | core + 우선 5개(contentflow·humscore·knowflow·lottolab·shorts) · org안 |
+| 격리형 | `bundles/isolated/hospital/` | hospital 단독 · core 없음(별도 프로젝트) |
+
+검증: `bash tests/bundles.sh`(대표 표본: 모노레포 · single news·astro·baedal · 격리형) · `--all`(전부, 오래 걸림) · 번들 이름 지정 가능.
+
 ## 기존 제품에 적용
 
-1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>]... [--with-accounts] [--with-example]`로 공통 마이그레이션(과 선택한 제품)을 복사합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
+1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>[:user|org]]... [--with-accounts] [--with-example]`로 공통 마이그레이션과 선택한 제품의 이식본(`products/<slug>/`)을 복사합니다. 제품 파일은 `scripts/build-bundles.sh` 번들과 같은 이름·목록이며(`2026120100NNMM_<slug>_<파일>.sql`), 안을 생략하면 `user/`가 있으면 user안, 없으면 org안입니다. 한 제품은 한 안만 설치합니다. 격리형 `hospital`은 공통 코어 없이 단독으로만 설치하며 다른 제품·`--with-accounts`·`--with-example`과 함께 쓰거나 코어가 있는 대상에 설치하면 거부합니다. `supabase/migrations/`의 옛 제품 청사진(`*_<slug>.sql`)은 설치하지 않으며(`--with-example`의 `contentflow_example`만 예외), 대상에 옛 청사진 설치본이 있으면 경고합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
 2. 실습에서는 두 번째 마이그레이션까지 적용합니다. 기존 운영 제품은 별도 제품 키를 등록하고, 기존 업체 ID·사용자 ID·멤버십을 연결하는 추가 마이그레이션을 만듭니다.
 3. 제품별 스키마에는 업무 데이터와 업체 ID를 둡니다. 기존 데이터는 소속을 확정한 뒤 채우고, 조회·쓰기 정책 검증을 완료한 다음 앱 연결을 전환합니다.
 4. Data API를 사용한다면 `public.nomad_dashboard_features`를 통해 대시보드 카탈로그를 조회합니다. 예시 업무 테이블에 Data API가 필요한 실습 환경에서만 `nomad_contentflow_example`을 노출 스키마에 추가합니다. `nomad_core`는 API에 노출하지 않습니다.
 5. 운영 환경에서는 스키마 변경을 한 CI 경로로 실행합니다. 강의·개발·운영 DB 연결값은 각각 분리합니다.
 
 [Supabase 마이그레이션](https://supabase.com/docs/guides/deployment/database-migrations) · [커스텀 스키마](https://supabase.com/docs/guides/api/using-custom-schemas)
+
+## 상태 값 사전 점검
+
+`20261117000101`~`107` 파일(contentflow·flora·knowflow·classroom·sceneflow·commerce)은 상태·종류 컬럼 8개에 not null·값 목록 check·기본값을 붙입니다. 허용 값은 각 파일의 check 식이 정본입니다. 기존 행은 바꾸지 않으며, null이나 목록 밖 값이 있으면 파일 맨 앞 점검에서 `테이블.컬럼 … 'done' 1건` 형식의 오류로 중단합니다.
+
+1. 적용 전, 설치한 제품의 스키마만 남기고 아래를 실행해 위반 행을 셉니다(결과가 없으면 통과).
+   ```sql
+   select 'nomad_contentflow.blog_members.role' as col, role as val, count(*) from nomad_contentflow.blog_members where role is null or role not in ('owner','editor','viewer') group by role
+   union all select 'nomad_flora.pipeline_runs.status', status, count(*) from nomad_flora.pipeline_runs where status is null or status not in ('queued','running','succeeded','failed','cancelled') group by status
+   union all select 'nomad_knowflow.messages.role', role, count(*) from nomad_knowflow.messages where role is null or role not in ('user','assistant') group by role
+   union all select 'nomad_classroom.materials.kind', kind, count(*) from nomad_classroom.materials where kind is null or kind not in ('document','video','link','image') group by kind
+   union all select 'nomad_sceneflow.edit_jobs.kind', kind, count(*) from nomad_sceneflow.edit_jobs where kind is null or kind not in ('cut','subtitle','render') group by kind
+   union all select 'nomad_sceneflow.edit_jobs.status', status, count(*) from nomad_sceneflow.edit_jobs where status is null or status not in ('queued','running','succeeded','failed','cancelled') group by status
+   union all select 'nomad_commerce.automation_jobs.status', status, count(*) from nomad_commerce.automation_jobs where status is null or status not in ('queued','running','succeeded','failed','cancelled') group by status
+   union all select 'nomad_commerce.orders.status', status, count(*) from nomad_commerce.orders where status is null or status not in ('pending','paid','shipped','delivered','cancelled','refunded') group by status;
+   ```
+2. 위반 행은 업무 담당자가 실제 상태를 확인해 직접 고칩니다. null을 `queued`·`pending`으로 일괄 채우면 끝난 작업·결제가 다시 처리될 수 있으므로 자동으로 채우지 않습니다.
+3. 실패 시: 파일 하나는 한 트랜잭션이라 실패한 파일은 아무것도 바뀌지 않지만, 앞 번호 제품 파일은 이미 적용되어 있을 수 있습니다. 위반 행을 정리한 뒤 같은 명령(`npx supabase db push`)을 다시 실행하면 남은 파일부터 이어서 적용됩니다.
+4. 적용 전 앱·워커 코드를 확인합니다. 이 컬럼들에 null을 넣거나 `status is null`로 신규 작업을 찾던 코드는 적용 후 오류가 나거나 조건이 어긋납니다. 생략하면 작업 status는 `queued`, 주문은 `pending`, 블로그 역할은 `editor`가 됩니다. `knowflow.messages.role`은 기본값이 없으므로 AI 응답을 저장하는 워커는 `role = 'assistant'`를 반드시 넘깁니다.
+5. `alter table`은 대상 테이블에 ACCESS EXCLUSIVE 잠금을 걸고 check 검증 동안 전체 행을 읽습니다. 행이 많은 테이블(주문·메시지 등)은 사용량이 적은 시간대에 적용합니다.
 
 ## 대시보드와 기능 이용권
 
@@ -39,9 +71,11 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 카탈로그 RPC는 `feature_code`, `title`, `unlocked`, `upgrade_to`, `addon_sku`, `can_purchase`를 반환합니다. `upgrade_to`는 가능한 최소 상위 플랜입니다. 잠긴 기능에만 구매·업그레이드 안내를 표시하고 `can_purchase`가 거짓이면 업체 담당자에게 요청하도록 안내합니다. `can_purchase`는 구매 실행 권한에 대한 UI 힌트입니다. 구매 서버도 호출자의 업체와 권한을 확인합니다.
 
+수량 한도는 `plan_limits`(`limit_key`별 정수)에 두며, 서버는 `org_plan_limit(조직, 제품, 키)`로 한도를 읽고 현재 개수를 세어 비교합니다(사용자 문맥은 멤버만 조회하는 `plan_limit`). 결과가 null이면 비멤버·비활성 업체·미정의 키이므로 생성을 거부합니다. 무제한은 2147483647이며 앱은 이 값과 같으면 "무제한"으로 표시합니다.
+
 기능 이용권은 제품과 업체에 묶입니다. 운영자 권한 레코드는 업체 멤버십과 별도로 관리합니다. 운영자 레코드만으로 제품 고객 데이터의 RLS가 열리지 않습니다.
 
-service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블에 쓰기 전에 `nomad_core.org_has_feature(업체, 제품, 기능)`로 기능 이용권을 직접 확인해야 합니다(사용자 JWT가 없는 문맥용, service_role만 실행). 로그인 사용자 문맥에서는 `has_feature`를 씁니다. 구독이 없는 업체는 C 플랜으로 취급합니다.
+service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블에 쓰기 전에 `nomad_core.org_has_feature(업체, 제품, 기능)`로 기능 이용권을 직접 확인해야 합니다(사용자 JWT가 없는 문맥용, service_role만 실행). 로그인 사용자 문맥에서는 `has_feature`를 씁니다. 구독이 없는 업체는 C 플랜으로 취급합니다. C 플랜은 무료 체험 등급입니다. 제품의 기본 기능이 C에 들어 있으면 구독이 끊겨도 C 수량 한도(plan_limits) 안에서 계속 쓸 수 있고, "구독이 끊기면 쓰기 잠김"은 C에 없는 유료 기능에만 적용됩니다(2026-11-16 결정).
 
 ## 결제 연결 계약
 
@@ -49,6 +83,17 @@ service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블
 - 검증한 결제만 구매 원장에 반영합니다. 결제사의 거래 식별자와 공급자 조합을 고유하게 저장하고, 결제 갱신과 이용권 부여를 하나의 서버 트랜잭션으로 반영합니다. 중복 이벤트는 기존 행을 확인하고 재처리합니다. 뒤늦은 성공 이벤트가 환불된 거래를 다시 열지 않도록 공급자의 최종 상태를 확인합니다.
 - 구독 갱신·업그레이드는 구독 레코드를 바꾸고, 단품 결제는 해당 기능 이용권을 추가합니다. 환불된 단품은 구매 상태가 `refunded`인 동안 이용권 검사에서 제외됩니다. 기간이 끝난 이용권도 만료됩니다.
 - 웹·모바일은 결제 성공 화면을 근거로 권한을 올리지 않습니다. 서버 확인 후 카탈로그를 새로 조회합니다.
+
+## 소셜 로그인과 API 키(BYOK)
+
+- 프로필(`20261119000100_nomad_core_profile_prefs.sql`, 모든 설치): `avatar_url`(https만)·`theme`(system·light·dark)·`updated_at`. 본인 조회·테마 변경은 `public.nomad_my_profile()`·`public.nomad_set_my_theme(text)`로만 한다(테이블은 서버 전용). `nomad_core.oauth_states`와 `consume_oauth_state(state)`는 중계 Edge Function(service_role) 전용 1회용 state이며 `redirect_to`는 `/`로 시작하는 상대 경로만 허용한다.
+- 가입(`20261119000150_nomad_core_accounts.sql`, `--with-accounts`): 이름은 `name` → 이메일 앞부분 → `full_name` → `nickname` 순, 사진은 `avatar_url`·`picture` 중 https만 저장. 익명 사용자가 정식 사용자로 전환(`is_anonymous` true→false)하면 같은 프로필·1인 조직 생성을 수행한다.
+- API 키(`20261119000200_nomad_core_api_credentials.sql`, 모든 설치): 원문은 `vault.secrets`(이름 `nomad:<org>:<provider>:<label>:<credential id>`), 메타·마지막 4자리만 `provider_credentials`. 등록·교체·폐기는 owner·admin(`public.nomad_set/revoke_provider_credential`), 목록은 멤버(`public.nomad_list_provider_credentials`). 같은 label로 다시 등록하거나 폐기하면 vault 행을 삭제한다. 복호화 `public.nomad_org_provider_secret`는 service_role(Edge Function) 전용이며 호출 때 `last_used_at`을 갱신한다.
+- state 검증: `state`는 32~256자, `redirect_to`는 `/`로 시작하는 2048자 이하 상대 경로(`//`·`/\`·공백·제어문자 거부)이다. `consume_oauth_state` 뒤 `provider`가 요청과 일치하는지는 호출 측(Edge Function)이 비교한다.
+- 사용자 입력 표시: 표시 이름·조직명은 사용자 입력이므로 화면에서 이스케이프한다. 사진 주소는 https이며 공백·제어문자가 없을 때만 저장한다. API 키는 20자 이상만 받고, 16자 미만이면 last4를 빈 값으로 저장한다.
+- 신뢰 범위(실측): service_role은 `vault.decrypted_secrets`를 직접 select할 수 있다. service_role 키를 가진 서버 코드 전체를 신뢰한다는 전제이며, 이 키는 브라우저·앱에 두지 않는다. authenticated·anon은 테이블·vault를 직접 읽을 수 없다.
+- 계정 연결 원칙: Supabase 기본(검증된 같은 이메일 자동 연결)을 유지한다. 카카오 무이메일·미검증 계정은 연결되지 않는다. 네이버 중계 Edge Function은 네이버 사용자 id로만 사용자를 찾고 이메일로 기존 계정을 찾지 않는다(계정 탈취 방지).
+- 운영: 키 원문이 RPC 인자로 지나가므로 운영 DB의 문장 로그(`log_statement`)는 끈다. `supabase/config.toml`의 `[auth.external.google|kakao]`는 꺼진 틀이며 client id·비밀은 배포 환경 변수로만 넣는다.
 
 ## 검증
 
@@ -58,4 +103,4 @@ service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블
 
 ## 서비스 청사진
 
-연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮기며, 확정된 서비스만 `install-db.sh --product <slug>`로 설치할 수 있습니다(초안은 설치 대상 아님).
+연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮기며, `install-db.sh --product <slug>`는 `products/<slug>/` 이식본이 있는 제품만 설치합니다(초안은 설치 대상 아님).

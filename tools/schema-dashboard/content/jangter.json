@@ -1,0 +1,85 @@
+{
+  "slug": "jangter",
+  "icon": "🥕",
+  "tagline": "동네 중고거래 글·채팅·후기",
+  "overview": "동네 중고거래 DB로, 판매자와 구매자가 판매 글·사진·관심 글·채팅방·메시지·거래 후기를 주고받는다. 조직형(org)은 판매 조직과 구매 조직이 당사자이고 읽기는 멤버·쓰기는 editor 이상·글과 후기 삭제는 owner·admin이며, 개인형(user)은 사용자 본인이 소유한다. trade_core 기능은 A·B·C 전 플랜에 있고, 이용권이 없으면 쓰기만 잠기고 읽기·공개 열람은 유지된다. 표는 본인·거래 당사자만 보며 공개 목록은 RPC로만 열리고 저장 경로·판매자 id는 돌려주지 않는다. 금액(price)은 정수(원)다.",
+  "diagrams": [
+    {
+      "title": "거래 흐름",
+      "mermaid": "flowchart LR\n  Anon[누구나 anon] --> LL[list_listings · get_listing]\n  Anon --> LSR[listing_seller_reviews]\n  LL --> LI[listings]\n  LSR --> RV[reviews]\n  Seller[판매자] --> LI\n  Seller --> LP[listing_photos]\n  Buyer[구매자] --> FV[favorites]\n  Buyer --> OC[open_chat]\n  OC --> CR[chat_rooms]\n  Buyer --> MSG[messages]\n  Seller --> MSG\n  MSG --> CR\n  Both[당사자] --> MCR[my_chat_rooms]\n  MCR --> CR\n  Both --> RV"
+    }
+  ],
+  "files": {
+    "products/jangter/org/0001_jangter.sql": {
+      "summary": "nomad_jangter·nomad_jangter_private 스키마와 jangter 제품·플랜(A/B/C)·기능 trade_core를 등록한다. 판매 조직과 구매 조직이 당사자인 6개 표, 판정 함수, 공개 RPC 3개와 당사자 RPC 2개를 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["listings", "판매 조직의 판매 글(제목·정수 가격·동네·상태 on_sale·reserved·sold·hidden), sold면 거래한 구매 방 기록 필수"],
+            ["listing_photos", "판매 글 사진, 경로는 <organization_id>/<listing_id>/로 시작"],
+            ["favorites", "조직의 관심 글, 공개 글만 담기"],
+            ["chat_rooms", "구매 조직-판매 조직 채팅방, 생성은 open_chat, 글이 지워져도 대화 보존"],
+            ["messages", "채팅 메시지, 수정·삭제 불가"],
+            ["reviews", "거래 후기, 채팅방당 작성 조직 1건·판매 완료 글만"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["list_listings(p_dong, p_limit, p_offset)", "anon 포함 공개 판매 글 목록(동네별), 숨김 제외"],
+            ["get_listing(p_listing_id)", "공개 글 상세, 숨김·없음·비활성 조직은 같은 빈 결과"],
+            ["listing_seller_reviews(p_listing_id, p_limit, p_offset)", "공개 글 판매 조직이 받은 후기, 작성 조직·방 id 비노출"],
+            ["open_chat(p_listing_id, p_buyer_org)", "구매 조직 editor 이상이 채팅 시작, 숨김·없음은 P0002, 판매 완료·자기 조직 글은 22023"],
+            ["my_chat_rooms(p_org)", "조직의 채팅방 목록, 상대방은 조직 이름만"],
+            ["can_write / listing_visible / room_sold_for", "비노출 판정: 쓰기 잠금·공개 글 여부·후기 작성 자격"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["당사자 격리", "모든 표 RLS, 글은 판매 조직 멤버만, 채팅·메시지는 두 당사자 조직 멤버만, anon 표 접근 0"],
+            ["존재 노출 금지", "숨김과 없음을 구분하지 않고, 비멤버는 42501로 먼저 거부"],
+            ["쓰기 잠금", "has_feature(조직, jangter, trade_core) 없으면 쓰기만 잠김"],
+            ["소유 컬럼 고정", "사용자 insert에 id·created_by grant 없음, organization_id 변경 불가"]
+          ]
+        }
+      ]
+    },
+    "products/jangter/user/0001_jangter.sql": {
+      "summary": "개인형 장터: 같은 6개 표를 auth.users 소유(seller_id·user_id·writer_id)로 만들고, 잠금은 user_has_feature(jangter, trade_core)로 쓰기만 막는다. 공개 RPC 3개와 open_chat·my_chat_rooms를 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["listings", "판매자 본인 소유 판매 글, sold면 구매 방 기록 필수"],
+            ["listing_photos", "판매 글 사진, 경로는 <seller_id>/<listing_id>/로 시작"],
+            ["favorites", "사용자 관심 글, 공개 글만"],
+            ["chat_rooms", "구매자-판매자 채팅방, 생성은 open_chat"],
+            ["messages", "채팅 메시지, 수정·삭제 불가"],
+            ["reviews", "거래 후기, 채팅방당 작성자 1건·판매 완료 글만"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["list_listings / get_listing / listing_seller_reviews", "anon 포함 공개 열람, 저장 경로·판매자 id 비노출"],
+            ["open_chat(p_listing_id)", "로그인·잠금 확인 후 채팅 시작, 같은 글은 같은 방 반환"],
+            ["my_chat_rooms()", "내 채팅방 목록, 상대방은 표시 이름만(이메일·연락처 없음)"],
+            ["can_trade / listing_visible / room_sold_for_me", "비노출 판정: 쓰기 잠금·공개 글·후기 자격"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [["본인·당사자 격리", "모든 표 RLS, 글은 판매자 본인만, 채팅·후기는 당사자만, 공개 열람은 RPC로만"]]
+        }
+      ]
+    },
+    "products/jangter/check_org.sql": {
+      "summary": "판매·구매·제3 조직의 교차 접근 거부, anon 표 0, 존재 노출 금지, 비멤버 선거부, 복합 FK 조직 일치, 쓰기 잠금을 합성 데이터로 검사하고 rollback한다."
+    },
+    "products/jangter/check_user.sql": {
+      "summary": "판매자·구매자·제3자 교차 접근 거부, anon 표 0, 존재 노출 금지, 공개 RPC 최소 컬럼, offset 상한, 쓰기 잠금을 합성 데이터로 검사하고 rollback한다."
+    }
+  }
+}

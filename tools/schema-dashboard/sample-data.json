@@ -1,0 +1,4024 @@
+{
+ "generated_at": "2026-11-13T00:00:00+09:00 (샘플)",
+ "products": [
+  {
+   "slug": "humscore",
+   "name": "HumScore",
+   "repo": "humscore",
+   "form": "user",
+   "clients": [
+    "web",
+    "app",
+    "desktop",
+    "worker"
+   ],
+   "placeholder": false,
+   "note": "products/humscore/existing.md · user · org SQL에서 추출",
+   "variants": {
+    "existing": {
+     "tables": [
+      {
+       "schema": "public",
+       "name": "scores",
+       "comment": "악보",
+       "owner": "user",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": true,
+       "source_file": "humscore/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "setlists",
+       "comment": "콘티",
+       "owner": "user",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": true,
+       "source_file": "humscore/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "share_links",
+       "comment": "공유 링크",
+       "owner": "user",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "owner_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "humscore/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "transcription_jobs",
+       "comment": "변환 큐",
+       "owner": "user",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "humscore/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      }
+     ]
+    },
+    "single": {
+     "tables": [
+      {
+       "schema": "nomad_humscore",
+       "name": "scores",
+       "comment": "악보(Score 객체 전체 jsonb) — 소유자만 접근, 소프트 삭제, LWW 동기화",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "scores_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "scores_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "scores_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "scores_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "title",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "data",
+         "type": "jsonb",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": true,
+       "source_file": "humscore/user/0001_humscore.sql",
+       "renamed_from": "public.scores"
+      },
+      {
+       "schema": "nomad_humscore",
+       "name": "setlists",
+       "comment": "찬양 콘티 — items jsonb, updated_at 서버 now()",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "setlists_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "setlists_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "setlists_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "setlists_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "title",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "service_date",
+         "type": "date",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "memo",
+         "type": "text",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "share_notes",
+         "type": "boolean",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "items",
+         "type": "jsonb",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "item_count",
+         "type": "integer",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": true,
+       "source_file": "humscore/user/0001_humscore.sql",
+       "renamed_from": "public.setlists"
+      },
+      {
+       "schema": "nomad_humscore",
+       "name": "share_links",
+       "comment": "읽기 전용 공유 링크 — 토큰 해시만 저장",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "share_links_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "share_links_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "share_links_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "share_links_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "score_id",
+         "type": "uuid",
+         "nullable": true,
+         "pk": false,
+         "fk": "nomad_humscore.scores.id"
+        },
+        {
+         "name": "setlist_id",
+         "type": "uuid",
+         "nullable": true,
+         "pk": false,
+         "fk": "nomad_humscore.setlists.id"
+        },
+        {
+         "name": "owner_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "token_hash",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "expires_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "revoked_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "humscore/user/0001_humscore.sql",
+       "renamed_from": "public.share_links"
+      },
+      {
+       "schema": "nomad_humscore",
+       "name": "transcription_jobs",
+       "comment": "변환 작업 큐 — 사용자는 등록만, 상태 갱신은 워커(service_role)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "jobs_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "jobs_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "kind",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "status",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "input_path",
+         "type": "text",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "result",
+         "type": "jsonb",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "error",
+         "type": "text",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "humscore/user/0001_humscore.sql",
+       "renamed_from": "public.transcription_jobs"
+      }
+     ]
+    },
+    "tenant": {
+     "tables": [
+      {
+       "schema": "nomad_humscore",
+       "name": "scores",
+       "comment": "악보(Score 객체 전체 jsonb) — 소유자만 접근, 소프트 삭제, LWW 동기화",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "scores_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "scores_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "scores_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "scores_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "created_by",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "title",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "data",
+         "type": "jsonb",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": true,
+       "source_file": "humscore/org/0001_humscore.sql",
+       "renamed_from": "public.scores"
+      },
+      {
+       "schema": "nomad_humscore",
+       "name": "setlists",
+       "comment": "찬양 콘티 — items jsonb, updated_at 서버 now()",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "setlists_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "setlists_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "setlists_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "setlists_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "created_by",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "title",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "service_date",
+         "type": "date",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "memo",
+         "type": "text",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "share_notes",
+         "type": "boolean",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "items",
+         "type": "jsonb",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "item_count",
+         "type": "integer",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": true,
+       "source_file": "humscore/org/0001_humscore.sql",
+       "renamed_from": "public.setlists"
+      },
+      {
+       "schema": "nomad_humscore",
+       "name": "share_links",
+       "comment": "읽기 전용 공유 링크 — 토큰 해시만 저장",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "share_links_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "share_links_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "share_links_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "share_links_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "score_id",
+         "type": "uuid",
+         "nullable": true,
+         "pk": false,
+         "fk": "nomad_humscore.scores.id"
+        },
+        {
+         "name": "setlist_id",
+         "type": "uuid",
+         "nullable": true,
+         "pk": false,
+         "fk": "nomad_humscore.setlists.id"
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "created_by",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "token_hash",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "expires_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "revoked_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "humscore/org/0001_humscore.sql",
+       "renamed_from": "public.share_links"
+      },
+      {
+       "schema": "nomad_humscore",
+       "name": "transcription_jobs",
+       "comment": "변환 작업 큐 — 사용자는 등록만, 상태 갱신은 워커(service_role)",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "jobs_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "jobs_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "created_by",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "kind",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "status",
+         "type": "text",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "input_path",
+         "type": "text",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "result",
+         "type": "jsonb",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "error",
+         "type": "text",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "created_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "humscore/org/0001_humscore.sql",
+       "renamed_from": "public.transcription_jobs"
+      }
+     ]
+    },
+    "monorepo": {
+     "tables": []
+    }
+   },
+   "local_storage": [
+    {
+     "key": "nomad.humscore.scores.v1",
+     "platform": "web·app·desktop",
+     "content": "악보 캐시",
+     "sync": "서버와 동기화",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.humscore.scores_dirty.v1",
+     "platform": "web·app",
+     "content": "업로드 대기 id",
+     "sync": "큐",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.humscore.scores_tombstones.v1",
+     "platform": "web·app",
+     "content": "삭제 표식",
+     "sync": "큐",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.humscore.owner.v1",
+     "platform": "web·app",
+     "content": "캐시 소유자 id",
+     "sync": "없음",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.humscore.keys_draft.v1",
+     "platform": "web",
+     "content": "작곡 편집 초안",
+     "sync": "없음",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.humscore.preferences.v1",
+     "platform": "web·app",
+     "content": "사용자 설정",
+     "sync": "없음",
+     "secret": false,
+     "clear_on_logout": false
+    },
+    {
+     "key": "nomad.theme",
+     "platform": "web·app",
+     "content": "system · light · dark",
+     "sync": "profiles.theme",
+     "secret": false,
+     "clear_on_logout": false
+    },
+    {
+     "key": "humscore.llm.v1 (폐기)",
+     "platform": "web",
+     "content": "LLM API 키 — 평문 저장 금지, BYOK 이관 후 삭제",
+     "sync": "없음",
+     "secret": true,
+     "clear_on_logout": true
+    }
+   ]
+  },
+  {
+   "slug": "lottolab",
+   "name": "LOTTO-LAB",
+   "repo": "LOTTO-LAB",
+   "form": "user",
+   "clients": [
+    "app",
+    "desktop",
+    "web",
+    "worker"
+   ],
+   "placeholder": false,
+   "note": "products/lottolab/existing.md · user · org · app SQL에서 추출(컬럼은 주요 항목만)",
+   "variants": {
+    "existing": {
+     "tables": [
+      {
+       "schema": "public",
+       "name": "waitlist_signups",
+       "comment": "대기자 등록 — service_role(EF) 전용",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "private",
+       "name": "rate_limits",
+       "comment": "EF 레이트리밋(내부 스키마 nomad_lottolab_private)",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "ingestion_runs",
+       "comment": "수집 실행 기록 — service_role만",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "draws_lotto",
+       "comment": "로또 회차 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "draws_lotto_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop",
+        "web"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "draws_pension",
+       "comment": "연금복권 회차 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "draws_pension_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop",
+        "web"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "statistics_cache",
+       "comment": "통계 캐시 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "statistics_cache_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "generator_profiles",
+       "comment": "번호 생성 설정",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "generator_profiles_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "generated_batches",
+       "comment": "생성 묶음(추가 전용)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "generated_batches_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "generated_numbers",
+       "comment": "생성 번호 — batch 경유 소유",
+       "owner": "indirect",
+       "rls": false,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "saved_tickets",
+       "comment": "저장한 티켓, 멱등 키",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "saved_tickets_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "draw_checks",
+       "comment": "당첨 판정 — 쓰기 service_role, ticket 경유",
+       "owner": "indirect",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "fortune_profiles",
+       "comment": "사주 프로필(1인 1행)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "fortune_profiles_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      },
+      {
+       "schema": "public",
+       "name": "user_consents",
+       "comment": "동의 기록(추가 전용)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "user_consents_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "LOTTO-LAB/supabase/migrations (기존 레포)",
+       "renamed_from": null
+      }
+     ]
+    },
+    "single": {
+     "tables": [
+      {
+       "schema": "nomad_lottolab",
+       "name": "waitlist_signups",
+       "comment": "대기자 등록 — service_role(EF) 전용",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab_private",
+       "name": "rate_limits",
+       "comment": "EF 레이트리밋(내부 스키마 nomad_lottolab_private)",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "ingestion_runs",
+       "comment": "수집 실행 기록 — service_role만",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "draws_lotto",
+       "comment": "로또 회차 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "draws_lotto_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop",
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "draws_pension",
+       "comment": "연금복권 회차 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "draws_pension_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop",
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "statistics_cache",
+       "comment": "통계 캐시 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "statistics_cache_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "generator_profiles",
+       "comment": "번호 생성 설정",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "generator_profiles_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "generated_batches",
+       "comment": "생성 묶음(추가 전용)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "generated_batches_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "generated_numbers",
+       "comment": "생성 번호 — batch 경유 소유",
+       "owner": "indirect",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "saved_tickets",
+       "comment": "저장한 티켓, 멱등 키",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "saved_tickets_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "draw_checks",
+       "comment": "당첨 판정 — 쓰기 service_role, ticket 경유",
+       "owner": "indirect",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "fortune_profiles",
+       "comment": "사주 프로필(1인 1행)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "fortune_profiles_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "user_consents",
+       "comment": "동의 기록(추가 전용)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "user_consents_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/user/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "push_devices",
+       "comment": "기기 알림 토큰(신규)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "push_devices_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "push_devices_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "push_devices_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "push_devices_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop"
+       ],
+       "sync": false,
+       "source_file": "lottolab/app/0001_app_tables.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "subscription_accounts",
+       "comment": "스토어 영수증 검증(신규, P2)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "subscription_accounts_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "subscription_accounts_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "subscription_accounts_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "subscription_accounts_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/app/0001_app_tables.sql",
+       "renamed_from": null
+      }
+     ]
+    },
+    "tenant": {
+     "tables": [
+      {
+       "schema": "nomad_lottolab",
+       "name": "waitlist_signups",
+       "comment": "대기자 등록 — service_role(EF) 전용",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab_private",
+       "name": "rate_limits",
+       "comment": "EF 레이트리밋(내부 스키마 nomad_lottolab_private)",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "ingestion_runs",
+       "comment": "수집 실행 기록 — service_role만",
+       "owner": "server",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "draws_lotto",
+       "comment": "로또 회차 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "draws_lotto_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop",
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "draws_pension",
+       "comment": "연금복권 회차 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "draws_pension_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop",
+        "web"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "statistics_cache",
+       "comment": "통계 캐시 — anon 공개 읽기",
+       "owner": "public",
+       "rls": true,
+       "policies": [
+        {
+         "name": "statistics_cache_read",
+         "cmd": "select",
+         "roles": [
+          "anon"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "generator_profiles",
+       "comment": "번호 생성 설정",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "generator_profiles_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generator_profiles_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "generated_batches",
+       "comment": "생성 묶음(추가 전용)",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "generated_batches_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "generated_batches_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "generated_numbers",
+       "comment": "생성 번호 — batch 경유 소유",
+       "owner": "indirect",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "saved_tickets",
+       "comment": "저장한 티켓, 멱등 키",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "saved_tickets_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "saved_tickets_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "draw_checks",
+       "comment": "당첨 판정 — 쓰기 service_role, ticket 경유",
+       "owner": "indirect",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "worker"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "fortune_profiles",
+       "comment": "사주 프로필(1인 1행)",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "fortune_profiles_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "fortune_profiles_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        },
+        {
+         "name": "updated_at",
+         "type": "timestamptz",
+         "nullable": false,
+         "pk": false,
+         "fk": null
+        },
+        {
+         "name": "deleted_at",
+         "type": "timestamptz",
+         "nullable": true,
+         "pk": false,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": true,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "user_consents",
+       "comment": "동의 기록(추가 전용)",
+       "owner": "org",
+       "rls": true,
+       "policies": [
+        {
+         "name": "user_consents_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "user_consents_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "organization_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "nomad_core.organizations.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/org/0001_lottolab.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "push_devices",
+       "comment": "기기 알림 토큰(신규)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "push_devices_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "push_devices_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "push_devices_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "push_devices_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app",
+        "desktop"
+       ],
+       "sync": false,
+       "source_file": "lottolab/app/0001_app_tables.sql",
+       "renamed_from": null
+      },
+      {
+       "schema": "nomad_lottolab",
+       "name": "subscription_accounts",
+       "comment": "스토어 영수증 검증(신규, P2)",
+       "owner": "user",
+       "rls": true,
+       "policies": [
+        {
+         "name": "subscription_accounts_select",
+         "cmd": "select",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "subscription_accounts_insert",
+         "cmd": "insert",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "subscription_accounts_update",
+         "cmd": "update",
+         "roles": [
+          "authenticated"
+         ]
+        },
+        {
+         "name": "subscription_accounts_delete",
+         "cmd": "delete",
+         "roles": [
+          "authenticated"
+         ]
+        }
+       ],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        },
+        {
+         "name": "user_id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": false,
+         "fk": "auth.users.id"
+        }
+       ],
+       "used_by": [
+        "app"
+       ],
+       "sync": false,
+       "source_file": "lottolab/app/0001_app_tables.sql",
+       "renamed_from": null
+      }
+     ]
+    },
+    "monorepo": {
+     "tables": []
+    }
+   },
+   "local_storage": [
+    {
+     "key": "nomad.lottolab.ticket.v1:<id>",
+     "platform": "app·desktop",
+     "content": "저장 티켓 레코드",
+     "sync": "서버와 동기화",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.lottolab.generated.v1:<id>",
+     "platform": "app·desktop",
+     "content": "생성 번호 레코드",
+     "sync": "없음",
+     "secret": false,
+     "clear_on_logout": true
+    },
+    {
+     "key": "nomad.lottolab.settings.v1:app",
+     "platform": "app·desktop",
+     "content": "연령 확인·마지막 설정",
+     "sync": "없음",
+     "secret": false,
+     "clear_on_logout": false
+    },
+    {
+     "key": "nomad.lottolab.cache.v1:<id>",
+     "platform": "app·desktop",
+     "content": "공개 회차·통계 캐시",
+     "sync": "없음",
+     "secret": false,
+     "clear_on_logout": false
+    },
+    {
+     "key": "nomad.theme",
+     "platform": "app·desktop",
+     "content": "system · light · dark",
+     "sync": "profiles.theme",
+     "secret": false,
+     "clear_on_logout": false
+    },
+    {
+     "key": "Supabase 세션",
+     "platform": "app",
+     "content": "Keychain / Keystore 보안 저장소만",
+     "sync": "없음",
+     "secret": true,
+     "clear_on_logout": true
+    }
+   ]
+  },
+  {
+   "slug": "contentflow",
+   "name": "ContentFlow",
+   "repo": "ContentFlow",
+   "form": "org",
+   "clients": [
+    "web",
+    "worker"
+   ],
+   "placeholder": true,
+   "note": "자리표시 — 생성기(2단계)에서 채움",
+   "variants": {
+    "existing": {
+     "tables": [
+      {
+       "schema": "nomad_contentflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/contentflow/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "single": {
+     "tables": [
+      {
+       "schema": "nomad_contentflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/contentflow/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "tenant": {
+     "tables": [
+      {
+       "schema": "nomad_contentflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/contentflow/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "monorepo": {
+     "tables": [
+      {
+       "schema": "nomad_contentflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/contentflow/",
+       "renamed_from": null
+      }
+     ]
+    }
+   },
+   "local_storage": []
+  },
+  {
+   "slug": "knowflow",
+   "name": "KnowFlow",
+   "repo": "KnowFlow",
+   "form": "org",
+   "clients": [
+    "web"
+   ],
+   "placeholder": true,
+   "note": "자리표시 — 생성기(2단계)에서 채움",
+   "variants": {
+    "existing": {
+     "tables": [
+      {
+       "schema": "nomad_knowflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/knowflow/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "single": {
+     "tables": [
+      {
+       "schema": "nomad_knowflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/knowflow/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "tenant": {
+     "tables": [
+      {
+       "schema": "nomad_knowflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/knowflow/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "monorepo": {
+     "tables": [
+      {
+       "schema": "nomad_knowflow",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/knowflow/",
+       "renamed_from": null
+      }
+     ]
+    }
+   },
+   "local_storage": []
+  },
+  {
+   "slug": "shorts",
+   "name": "Shorts",
+   "repo": "Shorts",
+   "form": "org",
+   "clients": [
+    "web",
+    "worker"
+   ],
+   "placeholder": true,
+   "note": "자리표시 — 생성기(2단계)에서 채움",
+   "variants": {
+    "existing": {
+     "tables": [
+      {
+       "schema": "nomad_shorts",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/shorts/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "single": {
+     "tables": [
+      {
+       "schema": "nomad_shorts",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/shorts/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "tenant": {
+     "tables": [
+      {
+       "schema": "nomad_shorts",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/shorts/",
+       "renamed_from": null
+      }
+     ]
+    },
+    "monorepo": {
+     "tables": [
+      {
+       "schema": "nomad_shorts",
+       "name": "(예시) items",
+       "comment": "자리표시 테이블",
+       "owner": "org",
+       "rls": true,
+       "policies": [],
+       "columns": [
+        {
+         "name": "id",
+         "type": "uuid",
+         "nullable": false,
+         "pk": true,
+         "fk": null
+        }
+       ],
+       "used_by": [
+        "web"
+       ],
+       "sync": false,
+       "source_file": "products/shorts/",
+       "renamed_from": null
+      }
+     ]
+    }
+   },
+   "local_storage": []
+  }
+ ],
+ "core": {
+  "areas": [
+   {
+    "name": "계정·조직",
+    "tables": [
+     {
+      "schema": "nomad_core",
+      "name": "profiles",
+      "comment": "프로필·테마",
+      "owner": "user",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "organizations",
+      "comment": "조직(개인=1인 조직)",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "memberships",
+      "comment": "멤버십·역할",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "invitations",
+      "comment": "초대",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "platform_admins",
+      "comment": "플랫폼 관리자",
+      "owner": "server",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     }
+    ],
+    "functions": [
+     {
+      "schema": "nomad_core",
+      "name": "my_profile",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "my_organizations",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "create_team_organization",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "organization_role",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "accept_invitation",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "플랜·기능·한도",
+    "tables": [
+     {
+      "schema": "nomad_core",
+      "name": "products",
+      "comment": "제품 목록",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "plans",
+      "comment": "플랜 A/B/C",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "features",
+      "comment": "기능 목록",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "plan_features",
+      "comment": "플랜별 기능",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "plan_limits",
+      "comment": "플랜별 수량 한도",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     }
+    ],
+    "functions": [
+     {
+      "schema": "nomad_core",
+      "name": "has_feature",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "org_has_feature",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "org_plan_limit",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "plan_limit",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "구독·이용권·크레딧",
+    "tables": [
+     {
+      "schema": "nomad_core",
+      "name": "subscriptions",
+      "comment": "구독",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "addon_products",
+      "comment": "단품 이용권 상품",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "addon_purchases",
+      "comment": "단품 구매",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "feature_grants",
+      "comment": "기능 부여",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "credit_ledger",
+      "comment": "크레딧 원장",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     }
+    ],
+    "functions": [
+     {
+      "schema": "nomad_core",
+      "name": "grant_credits",
+      "security_definer": true,
+      "grants": [
+       "service_role"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "spend_credits",
+      "security_definer": true,
+      "grants": [
+       "service_role"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "write_credit_entry",
+      "security_definer": true,
+      "grants": [
+       "service_role"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "credit_balance",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "인증·소셜 로그인",
+    "tables": [
+     {
+      "schema": "nomad_core",
+      "name": "oauth_states",
+      "comment": "OAuth 상태값(1회용)",
+      "owner": "server",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     },
+     {
+      "schema": "nomad_core",
+      "name": "api_providers",
+      "comment": "제공자 코드 목록",
+      "owner": "public",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     }
+    ],
+    "functions": [
+     {
+      "schema": "nomad_core",
+      "name": "consume_oauth_state",
+      "security_definer": true,
+      "grants": [
+       "service_role"
+      ]
+     }
+    ]
+   },
+   {
+    "name": "API 키",
+    "tables": [
+     {
+      "schema": "nomad_core",
+      "name": "provider_credentials",
+      "comment": "BYOK 키(암호화 저장)",
+      "owner": "org",
+      "rls": true,
+      "policies": [],
+      "columns": [
+       {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "pk": true,
+        "fk": null
+       }
+      ],
+      "used_by": [
+       "web",
+       "app"
+      ],
+      "sync": false,
+      "source_file": "supabase/migrations/",
+      "renamed_from": null
+     }
+    ],
+    "functions": [
+     {
+      "schema": "nomad_core",
+      "name": "set_provider_credential",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "list_provider_credentials",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "revoke_provider_credential",
+      "security_definer": true,
+      "grants": [
+       "authenticated"
+      ]
+     },
+     {
+      "schema": "nomad_core",
+      "name": "org_provider_secret",
+      "security_definer": true,
+      "grants": [
+       "service_role"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

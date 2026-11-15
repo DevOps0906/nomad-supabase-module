@@ -1,0 +1,70 @@
+{
+  "slug": "school",
+  "icon": "🏫",
+  "tagline": "학교 학급·과목·출석 관리",
+  "overview": "학교 하나가 조직 하나이고, admin(조직 owner/admin)·teacher·student(members.school_role)가 쓴다. 학급·과목·교사와 학생 명부·과목별 출석을 담는다. 기본 기능 school은 A·B·C 전 플랜에 있고 출석 xlsx 내보내기(export_xlsx)는 A·B만이며, 학급·학생 수는 plan_limits(max_classes·max_students)로 제한한다. 학생은 자기 행·자기 출석만 보고, 구성원·출석 쓰기는 RPC로만 한다.",
+  "diagrams": [
+    {
+      "title": "구성원 등록과 출석 흐름",
+      "mermaid": "flowchart LR\n  Server[서버 service_role] --> RW[register_workspace]\n  RW --> WS[workspaces]\n  Admin[admin] --> CL[classes · subjects 직접 쓰기]\n  Admin --> ISM[invite_school_member]\n  ISM --> MB[members]\n  Admin --> AC[assign_class]\n  AC --> MB\n  Teacher[teacher] --> MA[mark_attendance / mark_attendance_bulk]\n  MA --> AT[attendance]\n  Teacher --> DS[dashboard_stats · attendance_trend]\n  DS --> AT\n  Student[student] --> SS[student_summary]\n  SS --> AT"
+    }
+  ],
+  "files": {
+    "products/school/org/0001_school.sql": {
+      "summary": "nomad_school·nomad_school_private 스키마와 school 제품·플랜(A/B/C)·기능(school·export_xlsx)을 등록한다. 작업공간·학급·과목·구성원·출석 표와 역할 도우미, 학급·학생 수 한도 트리거, 출석 RPC와 Realtime 구독을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["workspaces", "학교 작업공간(조직 1:1)과 학년도·교사 소급 출석 허용일, 등록은 service_role RPC만"],
+            ["classes", "학급(학년·담임), 조회는 접근자 전원·쓰기는 admin, 개수 한도 max_classes"],
+            ["subjects", "학급 소속 과목과 담당 교사, 조회는 접근자 전원·쓰기는 admin"],
+            ["members", "교사·학생 명부(이름·학번·학급), 코어 멤버십이 먼저 있어야 하고 쓰기는 RPC만"],
+            ["attendance", "학생·과목·KST 수업일별 출석(present·late·early_leave·absent), 쓰기는 RPC만"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["register_workspace(p_organization_id, p_school_name)", "서버 전용, 학교 작업공간 생성"],
+            ["update_workspace_settings(p_organization_id, p_school_name, p_school_year, p_teacher_backfill_days)", "admin이 학교명·학년도·교사 소급 허용일 변경"],
+            ["invite_school_member(p_organization_id, p_user_id, p_school_role, …)", "admin이 코어 초대를 수락한 사용자를 교사·학생으로 등록, 자기 자신은 불가"],
+            ["set_member_role / set_member_status(p_organization_id, p_user_id, …)", "admin이 구성원 역할·상태 변경"],
+            ["assign_class(p_organization_id, p_user_id, p_class_id, p_student_no)", "학생에게 학급·학번 배정, 학생이 아니면 SM003"],
+            ["mark_attendance(p_subject_id, p_student_id, p_attend_date, p_status, p_note)", "교직원 출석 체크, 미래 날짜·교사 소급 초과는 SM002, 학급 학생이 아니면 SM001"],
+            ["mark_attendance_bulk(p_subject_id, p_attend_date, p_entries)", "출석 일괄 체크(최대 200건)"],
+            ["dashboard_stats(p_organization_id, p_date)", "교직원 대시보드 통계(출석률·정시율·미체크 수)"],
+            ["attendance_trend(p_organization_id, p_from, p_to, p_class_id)", "교직원 기간별 출석 추이, 일수 상한 plan_limits attendance_trend_days(없으면 31, 최대 366)"],
+            ["student_summary(p_organization_id, p_month)", "학생 본인의 이번 달 출석률·지각·조퇴·결석 횟수·오늘 과목"],
+            ["has_access / is_admin / is_staff / my_role(target_organization)", "정책용 역할 도우미"],
+            ["내부 트리거", "updated_at 갱신, 학급·학생 수 한도 검사(plan_limits 정의 없으면 거부)"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, has_access로 같은 학교만, anon 접근 없음"],
+            ["학생 개인정보", "members는 본인 행과 교직원만, attendance는 교직원 전체와 학생 본인 행만 조회"],
+            ["Realtime", "attendance를 supabase_realtime 발행에 추가(출석 보드·학생 알림)"]
+          ]
+        }
+      ]
+    },
+    "products/school/org/0002_ai.sql": {
+      "summary": "AI 기능 이용권(ai_assistant 전 플랜, ai_voice·ai_wiki A·B)을 등록하고, core AI 표가 있을 때만 AI 라우팅 기본값을 넣는다. service_role만 접근하는 school-ai-docs 버킷을 만든다.",
+      "parts": [
+        {
+          "title": "기능·설정",
+          "items": [
+            ["AI 이용권", "ai_assistant(교직원 업무 어시스턴트)·ai_voice(음성 질의)·ai_wiki(규정 위키)"],
+            ["AI 라우팅 기본값", "nomad_core.ai_routing_settings가 있을 때만 시드, 없으면 알림 후 건너뜀"],
+            ["school-ai-docs 버킷", "비공개, 사용자 정책 없음(service_role만)"]
+          ]
+        }
+      ]
+    },
+    "products/school/check_org.sql": {
+      "summary": "합성 데이터로 학교 2곳 교차 접근 거부, admin·teacher·student·무역할 권한, 한도, 출석 규칙, 함수 권한을 검사하고 rollback한다."
+    }
+  }
+}

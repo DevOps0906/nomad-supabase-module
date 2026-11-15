@@ -1,0 +1,121 @@
+{
+  "slug": "shorts",
+  "icon": "🎬",
+  "tagline": "쇼핑 숏폼 6단계 제작·발행",
+  "overview": "쇼핑 숏폼을 소재(01)→원본(02)→대본(03)→음성(04)→렌더(05)→발행(06) 6단계로 만드는 제품이다. org안은 조직 멤버(쓰기 owner·admin·editor, 읽기 전체 멤버), user안은 본인(user_id = auth.uid())만 쓰며 표·함수 구성은 같다. 운영 채널·프로젝트·원본·대본·음성·렌더·발행·제휴 링크·성과 지표와 크레딧 원장, 작업 큐를 담는다. 플랜 기능 잠금은 없고, 작업마다 크레딧을 예약(render 30·tts 10·analyze 5·select_sources 5)하며 채널 연결 수는 비노출 표 channel_quotas(행 없음 = 1)로 제한한다. 단계 상태·권리 열·발행 상태는 함수 전용이고, 무거운 작업은 pgmq 큐와 worker_role 전용 함수로, 정리·성과 수집은 pg_cron으로 돈다.",
+  "diagrams": [
+    {
+      "title": "작업 큐와 크레딧",
+      "mermaid": "flowchart LR\n  U[사용자 세션] --> CJ[\"create_job(project, type, key)\"]\n  CJ --> J[jobs]\n  CJ -->|reserve| CL[credit_ledger]\n  CJ -->|pgmq.send| Q[\"shorts_render · shorts_tts · shorts_analyze\"]\n  W[워커 worker_role] -->|읽기| Q\n  W --> JS[\"job_start · job_heartbeat\"]\n  JS --> J\n  W --> SR[\"save_render · save_voice_take · save_source_scores\"]\n  SR --> RD[renders]\n  SR --> VT[voice_takes]\n  SR --> SO[sources]\n  W --> ST[settle_job]\n  ST -->|settle| CL\n  W --> RL[\"release_job · job_fail\"]\n  RL -->|release| CL\n  CR[pg_cron] --> SW[sweep_jobs]\n  SW --> J"
+    },
+    {
+      "title": "6단계 제작과 발행",
+      "mermaid": "flowchart LR\n  S1[\"01 소재 topics\"] --> S2[\"02 원본 sources\"]\n  S2 --> S3[\"03 대본 scripts\"]\n  S3 --> S4[\"04 음성 voice_takes\"]\n  S4 --> S5[\"05 렌더 renders\"]\n  S5 --> S6[\"06 발행 정책 점검\"]\n  U[사용자] --> AP[\"approve_step · request_step_change\"]\n  AP --> P[projects]\n  U --> PP[\"publish_policy · prepare_publication\"]\n  PP --> PC[policy_checks]\n  PP --> PB[publications]\n  UP[업로더 service_role] --> CLM[\"publication_claim · publication_finish\"]\n  CLM --> PB\n  CLM --> YQ[youtube_upload_quota]\n  PB --> VM[video_metrics]"
+    }
+  ],
+  "files": {
+    "products/shorts/org/0001_shorts.sql": {
+      "summary": "원본 마이그레이션 51개의 최종 상태를 nomad_shorts·nomad_shorts_private 스키마로 옮긴 조직형(org안) 파일이다. worker_role·worker_login 역할, 표 31개, 사용자·서버·워커 함수, RLS·열 단위 grant, pgmq 큐 3개, pg_cron 예약 3개, projects Realtime 발행을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["accounts", "운영 채널(다중 계정), oauth_token_ref는 Vault id이며 authenticated가 읽을 수 없음"],
+            ["categories", "카테고리 10종(로그인 읽기 전용, 쓰기 서버)"],
+            ["trend_items", "트렌드 급상승 상품(로그인 읽기 전용, 쓰기 서버)"],
+            ["projects", "숏폼 프로젝트(1 프로젝트 = 1 채널), current_step·step_status는 함수 전용, status는 서버 전용"],
+            ["project_events", "단계 이벤트 지표(추가 전용, 쓰기 서버)"],
+            ["topics", "01 소재 후보(생성은 서버, 사용자는 picked·product_url만 변경)"],
+            ["sources", "02 원본(URL·작성자·수집 시각 필수, 권리 열은 함수 전용, 파일은 보관 기간 뒤 삭제하고 행은 남김)"],
+            ["scripts", "03 대본 버전(approved_at은 함수 전용)"],
+            ["voice_takes", "04 음성 테이크(쓰기 서버)"],
+            ["renders", "05 렌더 버전(쓰기 서버, 워터마크 제거는 권리 확인 원본에만)"],
+            ["policy_checks", "발행 전 정책 점검(자동 항목은 서버, 사용자 체크는 함수 전용)"],
+            ["publications", "발행 1건(프로젝트당 1), 생성·예약은 함수 전용, 업로드 결과는 서버"],
+            ["publication_upload_sessions", "YouTube resumable 업로드 세션(업로더 함수 전용, 브라우저 반환 금지)"],
+            ["youtube_upload_quota", "videos.insert 일일 사용 수(PT 날짜, 업로더 함수 전용)"],
+            ["video_metrics", "발행 영상 일별 성과(쓰기 서버)"],
+            ["affiliate_links", "제휴 링크(본인은 program·disclosed·bio 열만, url·short_url은 서버)"],
+            ["link_clicks", "단축 링크 클릭(서버 기록, IP 원문 없이 방문자 해시)"],
+            ["bio_pages", "채널별 링크인바이오 페이지(인포크링크·리틀리)"],
+            ["bio_items", "링크인바이오 번호 항목(쓰기는 assign_bio_number·confirm_policy_check 전용)"],
+            ["chat_messages", "제작 파트너 대화(사용자는 role=user만, AI 응답은 서버)"],
+            ["chat_proposals", "제작 파트너 사전 확인 제안(서버 전용, 사용자는 1회 소비)"],
+            ["jobs", "오래 걸리는 작업 1건 = 1행(render·tts·analyze·collect 등), 상태 갱신은 워커"],
+            ["credit_ledger", "크레딧 원장(추가 전용, reserve·settle·release·charge)"],
+            ["extension_connections", "브라우저 확장 연결(토큰은 해시만, 쓰기 서버)"],
+            ["api_keys", "사용자 API 키 메타(원문은 Vault, 본인은 last4·status·tested_at만)"],
+            ["oauth_states", "OAuth state·PKCE verifier(10분·1회 사용, 사용자 접근 불가)"],
+            ["channel_slot_events", "채널 연결·해제·만료·한도 거부 감사 기록(토큰·이메일 원문 없음)"],
+            ["user_settings", "개인 환경설정 기본값(원본 user_profiles 이관, 본인만 읽기·쓰기)"],
+            ["nomad_shorts_private.channel_quotas", "채널 연결 한도(행 없음 = 1, 함수로만 읽음)"],
+            ["nomad_shorts_private.click_salts", "클릭 방문자 해시용 날짜별 소금(함수 전용)"],
+            ["nomad_shorts_private.metrics_runs", "성과 수집 실행 기록(30일 보관)"]
+          ]
+        },
+        {
+          "title": "함수(RPC) — 사용자 세션",
+          "items": [
+            ["create_job(p_project_id, p_type, p_idempotency_key, p_payload)", "작업 생성과 크레딧 예약, 단계 위반 55000·키 충돌 JK001·대기 상한 JQ001·잔액 부족 CR001"],
+            ["approve_step(p_project_id, p_step)", "사용자가 누른 단계 승인(1~5)"],
+            ["request_step_change(p_project_id, p_step)", "변경 요청, 뒤 단계 초기화·진행 작업 취소"],
+            ["mark_step_ready(p_project_id, p_step, p_status)", "AI 결과 도착 시 단계를 suggested·ready로(approved 불가)"],
+            ["set_source_checks · add_direct_source · save_source_use · edit_input_sources", "원본 다운로드 체크(10편까지)·직접 추가·사용 선택과 권리 근거 저장·편집 입력 원본 조회"],
+            ["chat_start_collect · chat_consume_proposal", "제작 파트너 소스 검색(탐색 최대 3회, CR003)·사전 확인 제안 1회 소비"],
+            ["publish_policy · confirm_policy_check · prepare_publication", "06 정책 점검 6항목 판정·사용자 체크·발행 준비 저장(6/6 통과 시만)"],
+            ["publication_retry · publication_confirm_absent", "업로드 다시 시도·결과 불명 시 영상 없음 확인 후 새 업로드"],
+            ["assign_bio_number(p_project_id, p_service)", "링크인바이오 번호 받기(채널별 1부터, 재사용 없음)"]
+          ]
+        },
+        {
+          "title": "함수(RPC) — 서버·워커",
+          "items": [
+            ["publication_claim · publication_resume_check · publication_session_begin · publication_session_save · publication_finish · publication_attempt_fail · publication_reject_copy · publish_recheck", "업로더(service_role)의 선점·재판정·세션 기록·결과 기록"],
+            ["youtube_save_connection · youtube_token_for · youtube_refresh_token · youtube_expire_token · youtube_clear_token · oauth_state_create · oauth_state_consume · channel_slot_status", "YouTube 연결·토큰(Vault)·OAuth state·채널 슬롯 사전 검사(서버 전용)"],
+            ["extension_heartbeat · extension_claim_job · extension_collect_list · extension_collect_download", "브라우저 확장의 하트비트·작업 claim·수집 결과 기록(서버 전용)"],
+            ["retention_due · retention_reserve · retention_confirm · retention_mark_deleted", "보관 기간이 지난 Storage 파일 삭제 예약·재판정·삭제 기록"],
+            ["record_link_click · save_video_metrics · metrics_targets · metrics_run_start · metrics_run_finish · queue_health · chat_create_proposal", "클릭 기록과 이동 주소·성과 저장·수집 실행 기록·큐 적체 조회·제안 생성"],
+            ["job_start · job_heartbeat · job_succeed · job_fail · job_retry · job_stop · settle_job · release_job", "worker_role 전용 작업 상태 갱신과 크레딧 확정·반환(nomad_shorts_private)"],
+            ["save_render · save_voice_take · save_source_scores · render_job_context · tts_job_context · analyze_sources_context", "worker_role 전용 결과 저장과 작업 입력 조회"],
+            ["내부·예약 함수", "sweep_jobs(매분)·call_collect_metrics(매일)·cleanup_analytics(매일)와 각 표의 *_guard·*_invalidate 트리거 함수"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, 같은 조직 멤버만 읽기, 쓰기는 owner·admin·editor"],
+            ["열 단위 grant", "단계 상태·권리 열·발행 상태 등은 사용자 쓰기 불가, 함수로만 바뀜"],
+            ["크레딧", "작업 생성 때 예약하고 성공 시 settle, 실패·취소 시 release(작업당 하나만)"],
+            ["비밀", "OAuth 토큰·API 키 원문은 Vault, 확장 토큰은 해시만, 클릭 IP는 원문 저장 안 함"],
+            ["작업 큐", "pgmq 큐 표는 worker_role만 접근(anon·authenticated·service_role 회수)"]
+          ]
+        }
+      ]
+    },
+    "products/shorts/org/0002_storage.sql": {
+      "summary": "비공개 버킷 4개(shorts-sources·shorts-voices·shorts-renders·shorts-thumbnails)를 크기·MIME 제한과 함께 만든다. storage.objects 정책이 없어 직접 접근은 모두 거부되고 서버가 서명 URL을 발급하며, 경로는 <organization_id>/<project_id>/<파일명>이다."
+    },
+    "products/shorts/org/check_org.sql": {
+      "summary": "org안을 적용한 뒤 조직 간 교차 접근을 합성 데이터로 검사하고 rollback한다. 통과하면 CHECK_ORG_OK를 출력한다."
+    },
+    "products/shorts/user/0001_shorts.sql": {
+      "summary": "org안과 같은 표·함수·큐·예약 작업을 만드는 개인형(user안) 파일이다. 소유 열이 organization_id 대신 user_id이고, RLS와 함수 권한 검사가 조직 역할 대신 user_id = auth.uid()로 본인만 허용한다.",
+      "parts": [
+        {
+          "title": "org안과 다른 점",
+          "items": [
+            ["소유자", "projects·accounts·credit_ledger 등 소유 열이 user_id"],
+            ["권한", "읽기·쓰기 모두 본인만(역할 구분 없음)"],
+            ["채널 한도", "channel_quotas가 사용자별(행 없음 = 1)"]
+          ]
+        }
+      ]
+    },
+    "products/shorts/user/0002_storage.sql": {
+      "summary": "org안과 같은 비공개 버킷 4개를 만들며, 객체 경로 규칙만 <user_id>/<project_id>/<파일명>이다."
+    },
+    "products/shorts/user/check_user.sql": {
+      "summary": "user안을 적용한 뒤 사용자 간 교차 접근을 합성 데이터로 검사하고 rollback한다. 통과하면 CHECK_USER_OK를 출력한다."
+    }
+  }
+}

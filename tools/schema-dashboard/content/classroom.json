@@ -1,0 +1,56 @@
+{
+  "slug": "classroom",
+  "icon": "🧑‍🏫",
+  "tagline": "교육 과정·자료·퀴즈·사전사후 평가",
+  "overview": "교육 기관(조직)의 manager(owner·admin)·instructor(배정된 editor)·observer(배정된 viewer)가 과정 단위로 쓴다. 과정·일차·자료·퀴즈와 문항·설문, 그리고 계정 없는 수강생의 학생 코드·응시 기록·설문 응답을 담는다. course_core는 전 플랜, quiz_bank는 A·B, pre_post_assessment는 A만이며 구독이 끊기면(C) 퀴즈 쓰기·평가 시작·응시 기록이 CL001로 잠기고 읽기는 유지된다. 학생 개인정보와 정답은 manager·instructor만 보고, 수강생 요청은 서버(service_role)만 처리하며 anon은 스키마 접근이 없다.",
+  "diagrams": [
+    {
+      "title": "역할별 흐름",
+      "mermaid": "flowchart LR\n  Manager[manager] --> CO[courses · course_days · materials · surveys]\n  Manager --> CI[course_instructors 배정]\n  Manager --> QZ[quizzes · quiz_questions]\n  Manager --> ISC[issue_student_codes]\n  ISC --> SC[student_codes]\n  Instructor[instructor] --> EV[\"courses 평가 시작 시각(pre/post_eval_from)\"]\n  Instructor --> TR[survey_responses 강사 응답]\n  Server[서버 service_role] --> QA[quiz_attempts]\n  Server --> SR[survey_responses 학생 응답]\n  Student[수강생 코드] --> Server\n  Observer[observer] --> RO[과정 구조 읽기만]"
+    }
+  ],
+  "files": {
+    "products/classroom/org/0001_classroom.sql": {
+      "summary": "nomad_classroom 스키마와 classroom 제품·플랜(A 비즈니스/B 프로/C 무료)·기능(course_core·quiz_bank·pre_post_assessment)을 등록한다. 원본 12개 표 중 조직·프로필을 core로 대체한 10개 표와 과정 역할 판정 함수, 학생 코드 발급 RPC, 평가 잠금 트리거, classroom-materials 버킷을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["courses", "과정 설정(과목·기간·접근 기간·사전/사후 평가 시작 시각), manager 쓰기·instructor는 평가 시작 시각만"],
+            ["course_instructors", "과정 배정, editor는 강사·viewer는 참관"],
+            ["course_days", "과정 일차와 학습 내용·활동·성과"],
+            ["quizzes", "퀴즈 정의(manual·generated), 쓰기는 quiz_bank 기능"],
+            ["materials", "강의 자료(파일 경로 또는 URL, 대상·묶음 구분), 파일은 자기 조직·과정 경로만"],
+            ["student_codes", "계정 없는 학생 1명당 코드 1개(이름 라벨·입장 시각), 발급은 RPC, 폐기는 revoked_at, 삭제 없음"],
+            ["quiz_questions", "직접 등록형 문항(정답 포함), manager·instructor만 읽기"],
+            ["quiz_attempts", "학생 코드별 퀴즈 응시 기록(사전·사후, 점수·답안), service_role만 쓰기"],
+            ["surveys", "학생용·강사용 설문 정의"],
+            ["survey_responses", "설문 응답, 학생 응답은 서버·강사 응답은 본인 1회"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["issue_student_codes(p_course, p_labels, p_valid_until)", "manager가 난수 학생 코드를 일괄 발급, 권한 없음·없는 과정은 같은 42501"],
+            ["course_role(p_course)", "호출자의 과정 역할(manager·instructor·observer 또는 null)"],
+            ["can_read_private / can_write / is_org_manager / is_teacher_survey / can_read_material", "정책용 판정: 개인정보 읽기·기능별 쓰기·과정 생성·강사 설문·자료 읽기"],
+            ["storage_course_role / storage_can_read(p_name)", "Storage 경로의 과정 역할과 읽기 가능 여부"],
+            ["내부 트리거", "과정 수정 가드(instructor는 평가 시각만, 잠김 시 CL001), 응시 기록 가드(pre_post_assessment 없으면 서버도 거부)"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직·과정 격리", "모든 표 RLS, 하위 표는 (course_id, organization_id) 복합 FK로 조직 일치 강제"],
+            ["학생 개인정보·정답", "student_codes·quiz_attempts·survey_responses·quiz_questions는 manager·instructor만, observer·미배정·anon은 0행"],
+            ["observer 자료 제한", "교사용 자료(audience teacher)·연습풀이(bundle solution)는 observer에게 숨김"],
+            ["classroom-materials 버킷", "비공개 50MB, 경로 <organization_id>/classroom/<course_id>/, 올리기·지우기는 manager, 학생은 서버 서명 URL로만"]
+          ]
+        }
+      ]
+    },
+    "products/classroom/check_org.sql": {
+      "summary": "합성 데이터로 다른 조직 접근 0, anon 접근 0, 역할별 읽기·쓰기 범위, 강사 평가 시작 규칙, 복합 FK, Storage 정책, 구독 끊김 잠금, 조직 비활성을 검사하고 rollback한다."
+    }
+  }
+}

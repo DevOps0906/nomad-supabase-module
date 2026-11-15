@@ -1,0 +1,88 @@
+{
+  "slug": "arch",
+  "icon": "🏛️",
+  "tagline": "건축 설계 앱 라이선스·기기·AI 실행",
+  "overview": "건축 설계 데스크톱 앱(Arch Studio)의 영구 라이선스·기기 활성화·빌드·법규 규칙 팩·표제란·클라우드 사본·AI 실행(렌더·법규 검토·설계 입력·제안서)을 담는 조직형 DB다. 조직 멤버가 쓰며 쓰기 역할은 owner·admin·editor, 표제란 저장과 기기 해제는 owner·admin이다. 작업 공간 접근은 멤버 + (workspace 이용권(A 월 구독·B 체험) 또는 활성 영구 라이선스)이고, 둘 다 없으면 잠긴다(구매 기록은 잠기지 않음). 결제 표는 두지 않고 일회성 주문(license_orders)만 두며 외부 결제 서버가 mark_license_order로 결과를 알린다. 라이선스 시리얼·기기·지번은 해시로만 저장하고, anon은 공개 상품 목록 RPC만 부를 수 있다.",
+  "diagrams": [
+    {
+      "title": "라이선스 구매와 AI 실행",
+      "mermaid": "flowchart LR\n  SV[서버 service_role] --> CLO[create_license_order]\n  PAY[외부 결제 서버] --> MLO[mark_license_order]\n  SV --> IL[issue_license]\n  SV --> AL[activate_license]\n  SV --> APD[activate_plan_device]\n  SV --> EU[extend_updates]\n  CLO --> LO[(license_orders)]\n  MLO --> LO\n  IL --> LI[(licenses)]\n  EU --> LI\n  AL --> LA[(license_activations)]\n  APD --> LA\n  U[사용자] --> DA[deactivate_activation]\n  DA --> LA\n  SV --> SAR[start_ai_run]\n  W[워커] --> FIN[finish_ai_run]\n  W --> FAIL[fail_ai_run]\n  SAR --> CORE[\"nomad_core.consume_credits·enqueue_job\"]\n  SAR --> RUNS[(\"renders·reviews·intake_runs·proposals\")]\n  FIN --> RUNS\n  FAIL --> RUNS"
+    },
+    {
+      "title": "AI 실행 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> queued\n  queued --> running\n  queued --> failed\n  running --> succeeded\n  running --> failed\n  failed --> refunded"
+    }
+  ],
+  "files": {
+    "products/arch/org/0001_arch.sql": {
+      "summary": "nomad_arch(공개)·nomad_arch_private(비노출) 스키마와 16개 표·RLS·RPC, 비공개 Storage 버킷(arch-releases·arch-user)을 만든다. 제품 arch와 A·B·C 플랜, 기능 8개를 등록하며 단가·운영 상수·상품·한도 수치는 시드하지 않는다.",
+      "parts": [
+        { "title": "플랜·기능", "items": [
+          ["A(월 구독)", "workspace·cloud_review·rule_pack_updates·ai_render·ai_intake + local_gpu_render·ai_layout·drafting_no_watermark"],
+          ["B(체험)", "workspace·cloud_review·rule_pack_updates·ai_render·ai_intake, 서버가 ends_at을 정해 구독 생성"],
+          ["C", "기능 없음, 영구 라이선스가 없으면 잠김"],
+          ["plan_limits 키", "render_max_px·site_lookups_per_day·ai_chat_turns_per_day·cloud_projects_max·max_activations(시드 없음)"]
+        ] },
+        { "title": "표", "items": [
+          ["runtime_config", "운영 상수·크레딧 단가(price.<variant>)·원화 가격, 서버 전용"],
+          ["license_skus", "영구 라이선스 상품(금액 정수 원), 공개 목록은 public_license_skus RPC만"],
+          ["builds", "데스크톱 빌드(상태 draft·published·withdrawn), 서버 전용"],
+          ["rule_packs", "법규 규칙 팩 메타데이터(서명 매니페스트), storage_path 제외하고 Arch 접근 사용자 읽기"],
+          ["rule_pack_changes", "규칙 팩 사이 개정 목록, 공개된 팩의 행만 읽기"],
+          ["cost_catalogs", "개략 공사비 단가표, 내용은 latest_cost_catalog RPC로만"],
+          ["license_orders", "영구 라이선스·업데이트 연장 일회성 주문(pending→paid/canceled, paid→refunded, 멱등 키)"],
+          ["licenses", "영구 라이선스(시리얼은 SHA-256 해시와 끝 5자만, active↔suspended→refunded/revoked)"],
+          ["license_activations", "기기 활성화(영구 라이선스 license / 체험·구독 plan), device_hash는 사용자에게 안 보임"],
+          ["drafting_profiles", "표제란·레이어 매핑(조직당 1행, 건축주 정보 없음)"],
+          ["cloud_projects", "클라우드 사본(프로젝트 스냅샷, version 낙관적 동시성)"],
+          ["renders", "AI 렌더 실행(render_std·render_hq·upscale), 선차감 크레딧·잡 연결"],
+          ["reviews", "클라우드 법규 검토 실행, 출처 없는 결과 저장 금지(AR033)"],
+          ["intake_runs", "대화형 설계 입력·상담 녹음 후보 실행(90일 뒤 삭제)"],
+          ["proposals", "제안서·템플릿 문서 PDF 실행, 같은 내용·버전 재요청은 0크레딧"],
+          ["site_lookups", "대지 조회 일일 상한 집계(지번 HMAC 해시와 날짜만), 사용자 접근 없음"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["create_license_order(p_org, p_actor, p_kind, p_sku, p_idempotency_key)", "서버가 주문 생성, 금액은 서버가 정하고 (조직, 멱등 키)로 중복 방지"],
+          ["mark_license_order(p_order_id, p_status, …)", "외부 결제 결과 반영(paid 금액 일치 필수·canceled·refunded), 같은 상태 재호출은 그대로 반환"],
+          ["issue_license(p_order_id)", "paid 주문으로 라이선스 발급, 시리얼 원문은 첫 호출 반환값에서만"],
+          ["activate_license(p_serial_hash, p_device_hash, p_user)", "영구 라이선스 기기 활성화"],
+          ["activate_plan_device(p_org, p_user, p_device_hash)", "체험·월 구독 기기 활성화, 한도는 max_activations"],
+          ["extend_updates(p_order_id)", "업데이트 1년 연장(주문 id 멱등)"],
+          ["eligible_build(p_org, p_platform, p_current)", "업데이트 매니페스트용 빌드 자격"],
+          ["record_site_lookup(p_org, p_pnu_hash)", "대지 조회 일일 상한 집계, 남은 횟수 반환"],
+          ["start_ai_run(p_org, p_actor, p_kind, p_variant, p_request_id, …)", "검사→크레딧 선차감→실행 행→잡 등록 한 트랜잭션, request_id 멱등(layout·walkthrough는 Phase 2로 거부)"],
+          ["finish_ai_run(p_run_id, p_result) · fail_ai_run(p_run_id, p_reason)", "워커가 결과 저장 후 mark_job_delivered, 또는 최종 실패 시 남은 크레딧 환불→refunded"],
+          ["reconcile_runs(p_org) · purge_expired()", "잡만 끝난 실행 정리, 보존 기간 지난 렌더 정리(삭제할 Storage 경로 반환)"],
+          ["public_license_skus()", "공개 상품 목록, anon도 호출 가능"],
+          ["deactivate_activation(p_activation_id)", "owner/admin 기기 해제, 셀프 해제는 30일 횟수 제한(AR004)"],
+          ["eligible_rule_packs(p_org) · latest_cost_catalog(p_org)", "업데이트 자격에 맞는 규칙 팩 목록·최신 단가표"],
+          ["upsert_drafting_profile(p, p_org)", "표제란 저장(owner/admin, AR042), 허용 키 밖은 22023"],
+          ["save_cloud_project(p_local_id, p_name, p_storage_path, p_expected_version)", "클라우드 사본 저장(editor 이상), 개수 한도 AR040·버전 충돌 AR041"],
+          ["is_member · has_access · has_arch_access · org_features", "RLS·자격 판정, org_features는 라이선스 상태 + 플랜 이용권·한도를 합친 기능 값"],
+          ["내부 도우미·트리거", "caller_org·actor_can_write·new_serial_body 등(private), 실행·주문·라이선스·빌드 상태 전이와 사본 버전 트리거"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 주문·라이선스·기기는 멤버 읽기(플랜과 무관)"],
+          ["작업 공간 잠금", "표제란·사본·AI 실행 읽기는 has_access(구독 또는 활성 라이선스)"],
+          ["해시 컬럼 비노출", "serial_hash·device_hash 등은 컬럼 grant에서 제외"],
+          ["서버 전용 표", "runtime_config·license_skus·builds·cost_catalogs·site_lookups는 사용자 grant 없음"],
+          ["Storage", "arch-releases·arch-user 비공개 버킷, 정책 없음 = 서버 서명 URL만"]
+        ] }
+      ]
+    },
+    "products/arch/org/0002_ai.sql": {
+      "summary": "arch 제품의 AI·음성 라우팅 기본값 14행(arch.review·intake·proposal_narrative·chat·layout·compliance·wiki.*·dify.aux·arch.knowledge·consult_recording·voice_chat)을 nomad_core.ai_routing_settings에 넣는다. 상담 녹음(consult_recording·arch.intake_consult)과 dify.aux는 오픈소스 강제다.",
+      "parts": [
+        { "title": "라우팅 기본값", "items": [
+          ["arch.review·intake·proposal_narrative·chat·layout", "LLM, anthropic 우선"],
+          ["arch.compliance·wiki.*", "LLM, oss-llm 우선"],
+          ["arch.intake_consult·dify.aux·consult_recording", "오픈소스 강제"],
+          ["체인 검사", "제공자 행이 있을 때만 존재·종류·오픈소스 모드 확인"]
+        ] }
+      ]
+    },
+    "products/arch/check_org.sql": {
+      "summary": "조직 2곳 교차 접근 거부·역할별 권한·공개 RPC·구독 끊김 잠금·크레딧 선차감·환불·잡·주문·라이선스·기기·AI 시드를 합성 데이터로 확인하고 rollback."
+    }
+  }
+}

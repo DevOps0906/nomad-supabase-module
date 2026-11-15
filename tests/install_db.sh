@@ -8,6 +8,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 OUT=""; RC=0
+# accounts 제외 core 파일 수(--with-accounts 없을 때 설치되는 수). core가 늘어도 검사가 깨지지 않게 소스에서 센다.
+CORE_N="$(ls "$ROOT"/supabase/migrations/*_nomad_core.sql "$ROOT"/supabase/migrations/*_nomad_core_*.sql | grep -vc '_nomad_core_accounts\.sql$')"
 
 ok()   { PASS=$((PASS+1)); echo "PASS  $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "FAIL  $1"; }
@@ -35,6 +37,7 @@ run "$T"
 expect_rc "첫 설치" 0
 M="$T/supabase/migrations"
 check "core 복사됨" test -n "$(ls "$M"/*_nomad_core.sql 2>/dev/null)"
+check "core 한도 파일 복사됨" test -n "$(ls "$M"/*_nomad_core_plan_limits.sql 2>/dev/null)"
 check "accounts 없음" test -z "$(ls "$M"/*_nomad_core_accounts.sql 2>/dev/null)"
 check "example 없음" test -z "$(ls "$M"/*_contentflow_example.sql 2>/dev/null)"
 check "lock 생성" test -f "$T/supabase/nomad.lock"
@@ -46,7 +49,7 @@ check "완료 문구 ✓" has '✓'
 cp "$T/supabase/nomad.lock" "$TMP/lock1"
 run "$T"
 expect_rc "재실행" 0
-check "재실행 후 파일 수 동일" test "$(ls "$M" | wc -l)" -eq 2
+check "재실행 후 파일 수 동일" test "$(ls "$M" | wc -l)" -eq "$CORE_N"
 check "재실행 '= ' 표시" has '^= '
 
 # 3. --check 최신
@@ -102,30 +105,68 @@ expect_rc "플래그 없이 재실행" 0
 check "accounts 계속 추적(재복사)" test -n "$(ls "$M3"/*_nomad_core_accounts.sql 2>/dev/null)"
 check "flags 유지" grep -q '^# flags.*--with-accounts' "$T3/supabase/nomad.lock"
 
-# 8. --product
+# 8. --product: products/<slug>/ 이식본을 build-bundles.sh 와 같은 이름으로 설치, 옛 청사진(supabase/migrations/*_<slug>.sql)은 설치 안 함
+OLD_BP='^[0-9]{14}_(contentflow|flora|knowflow|classroom|analytics|sceneflow|commerce|humscore|jangter|baedal|personal)\.sql$'
 T4="$(mk_target t4)"; M4="$T4/supabase/migrations"
 run "$T4" --product contentflow
 expect_rc "--product contentflow" 0
-check "contentflow 복사됨" test -n "$(ls "$M4"/*_contentflow.sql 2>/dev/null)"
-check "flags에 --product contentflow" grep -q '^# flags.*--product contentflow' "$T4/supabase/nomad.lock"
-rm -f "$M4"/*_contentflow.sql
+check "contentflow 이식본 복사됨(org안 = user안 없음)" test -f "$M4/20261201000801_contentflow_0001_contentflow.sql"
+check "contentflow 이식본 내용 = products/contentflow/org" cmp -s "$M4/20261201000801_contentflow_0001_contentflow.sql" "$ROOT/products/contentflow/org/0001_contentflow.sql"
+check "flags에 --product contentflow:org" grep -q '^# flags.*--product contentflow:org' "$T4/supabase/nomad.lock"
+check "옛 청사진 파일 없음(contentflow)" test -z "$(ls "$M4" | grep -E "$OLD_BP")"
+check "core 복사됨(contentflow)" test -n "$(ls "$M4"/*_nomad_core.sql 2>/dev/null)"
+rm -f "$M4"/*_contentflow_*.sql
 run "$T4"
-check "제품 기록 재실행 때 유지" test -n "$(ls "$M4"/*_contentflow.sql 2>/dev/null)"
-T5="$(mk_target t5)"
-run "$T5" --product hospital
-expect_rc "--product hospital (확정 없음)" 64
-check "hospital 안내 문구" has '확정 마이그레이션 없음'
-check "hospital 실패 시 lock 없음" test ! -e "$T5/supabase/nomad.lock"
+check "제품 기록 재실행 때 유지" test -n "$(ls "$M4"/*_contentflow_*.sql 2>/dev/null)"
+run "$T4" --product contentflow:user
+expect_rc "없는 안(contentflow:user)" 64
+run "$T4" --product knowflow
+expect_rc "다른 제품 추가(knowflow 기본 user안)" 0
+check "knowflow user안 2개" test "$(ls "$M4"/*_knowflow_*.sql | wc -l)" -eq 2
+check "knowflow 이식본 내용 = products/knowflow/user" cmp -s "$M4/20261201001501_knowflow_0001_knowflow.sql" "$ROOT/products/knowflow/user/0001_knowflow.sql"
+run "$T4" --product knowflow:org
+expect_rc "같은 제품 다른 안 거부" 64
+run "$T4" --product nope
+expect_rc "products/ 에 없는 제품" 64
+check "없는 제품 안내 문구" has 'products/nope 없음'
 
-# 8b. 부분 설치: --product humscore → humscore 2개 + core(기본 플랜 포함), 다른 제품 없음
+# 8a. personal: 옛 청사진(생년월일 평문) 대신 이식본, 옛 청사진 설치본이 있으면 경고
+T5="$(mk_target t5)"; M5="$T5/supabase/migrations"
+cp "$(ls "$ROOT"/supabase/migrations/*_personal.sql | head -1)" "$M5/"
+OLD_P="$(ls "$M5")"
+run "$T5" --product personal
+expect_rc "--product personal" 0
+check "personal user안 이식본" cmp -s "$M5/20261201001901_personal_0001_personal.sql" "$ROOT/products/personal/user/0001_personal.sql"
+check "옛 청사진 *_personal.sql 새로 설치 안 됨" test "$(ls "$M5" | grep -cE '^[0-9]{14}_personal\.sql$')" -eq 1
+check "옛 청사진 설치본 경고" has "^! $OLD_P"
+
+# 8b. 격리형 hospital: core 없이 단독, 섞이면 거부
+T10="$(mk_target t10)"; M10="$T10/supabase/migrations"
+run "$T10" --product hospital
+expect_rc "--product hospital" 0
+check "hospital 파일만(core 없음)" test "$(ls "$M10")" = "20261201000001_hospital_0001_hospital.sql"
+check "flags에 hospital:isolated" grep -q '^# flags --product hospital:isolated' "$T10/supabase/nomad.lock"
+run "$T10" --check
+expect_rc "hospital --check 최신" 0
+run "$T10" --product personal
+expect_rc "hospital 대상에 다른 제품 추가 거부" 64
+run "$T4" --product hospital
+expect_rc "core 있는 대상에 hospital 거부" 64
+T11="$(mk_target t11)"
+run "$T11" --product hospital --with-accounts
+expect_rc "hospital + --with-accounts 거부" 64
+check "거부 시 lock 없음" test ! -e "$T11/supabase/nomad.lock"
+
+# 8c. 부분 설치: --product humscore → humscore 이식본 1개 + core(기본 플랜 포함), 다른 제품 없음
 T9="$(mk_target t9)"; M9="$T9/supabase/migrations"
 run "$T9" --product humscore
 expect_rc "--product humscore 부분 설치" 0
-check "humscore 파일 2개(청사진+기능 잠금)" test "$(ls "$M9"/*_humscore.sql 2>/dev/null | wc -l)" -eq 2
+check "humscore 이식본 1개(user안)" test "$(ls "$M9"/*_humscore_*.sql 2>/dev/null | wc -l)" -eq 1
 check "core 복사됨" test -n "$(ls "$M9"/*_nomad_core.sql 2>/dev/null)"
 check "core 기본 플랜 파일 복사됨" test -n "$(ls "$M9"/*_nomad_core_default_plan.sql 2>/dev/null)"
-check "다른 제품 파일 없음" test -z "$(ls "$M9" | grep -E '_(contentflow|flora|knowflow|classroom|analytics|sceneflow|commerce|jangter|baedal|personal)\.sql$')"
-check "총 4개 파일(core 2 + humscore 2)" test "$(ls "$M9" | wc -l)" -eq 4
+check "옛 청사진·다른 제품 파일 없음" test -z "$(ls "$M9" | grep -E "$OLD_BP")"
+check "core 한도 파일 복사됨" test -n "$(ls "$M9"/*_nomad_core_plan_limits.sql 2>/dev/null)"
+check "총 파일 수(core $CORE_N + humscore 1)" test "$(ls "$M9" | wc -l)" -eq "$((CORE_N + 1))"
 
 # 9. --with-example
 T6="$(mk_target t6)"

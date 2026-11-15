@@ -1,0 +1,95 @@
+/* tokens.css — 디자인 정답 소스. 정적 웹(번들러 없음)이라 일반 CSS 변수로 둔다. DESIGN.md 표는 이 파일에서 만든다. */
+:root {
+  /* 색 (라이트) */
+  --color-bg: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-text: #15171a;
+  --color-text-muted: #5b6270;
+  --color-border: #e3e6eb;
+  --color-input: #858d9b;
+  --color-primary: #2f5bea;
+  --color-primary-fg: #ffffff;
+  --color-success: #1f7a45;
+  --color-success-fg: #ffffff;
+  --color-warning: #9a5f00;
+  --color-warning-fg: #ffffff;
+  --color-danger: #c13030;
+  --color-danger-fg: #ffffff;
+  --color-overlay: rgba(0, 0, 0, 0.45); /* 모달 뒤 배경 */
+
+  /* 서체 */
+  --font-sans: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* 글자 크기 — 모바일 기준값 */
+  --text-display: 28px;
+  --text-h1: 24px;
+  --text-h2: 20px;
+  --text-body: 15px;
+  --text-caption: 12px;
+
+  /* 간격 · 반경 · 그림자 · 레이아웃 */
+  --spacing: 4px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 12px rgb(0 0 0 / 0.06);
+  --space-1: calc(var(--spacing) * 1);
+  --space-2: calc(var(--spacing) * 2);
+  --space-3: calc(var(--spacing) * 3);
+  --space-4: calc(var(--spacing) * 4);
+  --space-6: calc(var(--spacing) * 6);
+  --space-8: calc(var(--spacing) * 8);
+  --border-width: 1px;
+  --focus-width: 2px;
+  --size-nav: 240px;
+  --size-control: 40px;
+  --size-code-col: 22ch;
+  --size-dialog-max: 72rem; /* SQL 모달 최대 너비 */
+}
+
+@media (width >= 768px) {
+  :root { --text-display: 36px; --text-h1: 28px; --text-h2: 22px; --text-body: 16px; --text-caption: 13px; }
+}
+@media (width >= 1200px) {
+  :root { --text-display: 48px; --text-h1: 34px; --text-h2: 26px; --text-body: 16px; --text-caption: 13px; }
+}
+
+/* 다크: 저장값이 dark이거나, 저장값이 없고(system) OS가 다크일 때 */
+:root[data-theme="dark"] {
+  --color-bg: #0f1114;
+  --color-surface: #181b20;
+  --color-text: #eef0f3;
+  --color-text-muted: #9aa2ae;
+  --color-border: #2a2f37;
+  --color-input: #666e7c;
+  --color-primary: #7f9bff;
+  --color-primary-fg: #0f1114;
+  --color-success: #4cc27f;
+  --color-success-fg: #0f1114;
+  --color-warning: #e0a030;
+  --color-warning-fg: #0f1114;
+  --color-danger: #f07878;
+  --color-danger-fg: #0f1114;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --color-bg: #0f1114;
+    --color-surface: #181b20;
+    --color-text: #eef0f3;
+    --color-text-muted: #9aa2ae;
+    --color-border: #2a2f37;
+    --color-input: #666e7c;
+    --color-primary: #7f9bff;
+    --color-primary-fg: #0f1114;
+    --color-success: #4cc27f;
+    --color-success-fg: #0f1114;
+    --color-warning: #e0a030;
+    --color-warning-fg: #0f1114;
+    --color-danger: #f07878;
+    --color-danger-fg: #0f1114;
+    --color-overlay: rgba(0, 0, 0, 0.6);
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  }
+}

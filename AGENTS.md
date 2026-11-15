@@ -19,7 +19,10 @@
 | 로컬 DB 시작 | `npx supabase start` |
 | 마이그레이션 재적용 | `npx supabase db reset --local` (이 저장소 전용 디렉터리에서만) |
 | 접근 테스트 | `psql "<npx supabase status의 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql` |
-| 다른 저장소에 설치 | `bash scripts/install-db.sh <대상> [--product <slug>] [--with-accounts] [--check]` |
+| 감사 로그 테스트 | `docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1 < tests/audit.sql` |
+| 크레딧 원장 테스트 | `docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1 < tests/credits.sql` |
+| 작업 큐 테스트 | `docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1 < tests/jobs.sql` |
+| 다른 저장소에 설치 | `bash scripts/install-db.sh <대상> [--product <slug>[:user\|org]] [--with-accounts] [--check]` (제품은 `products/` 이식본) |
 | ERD 갱신 | `~/.claude/nomad/bin/sql2erd supabase/migrations -o docs/diagrams/erd.mmd` |
 긴 출력 명령은 `~/.claude/nomad/bin/q <명령>`으로 실행한다.
 

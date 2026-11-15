@@ -1,0 +1,74 @@
+{
+  "slug": "poll",
+  "icon": "🗳️",
+  "tagline": "실시간 청중 투표·Q&A DB",
+  "overview": "진행자(조직 멤버)가 행사를 만들고 투표 문항을 열고 닫으며, 로그인하지 않은 청중이 6자리 코드로 입장해 투표·질문·추천하는 live-poll의 조직형 이식본이다. 진행자는 자기 조직이고 poll 'host' 기능일 때만 읽고, 쓰기는 owner·admin·editor(viewer는 읽기만)가 RPC로 한다. 청중(anon)은 표 권한이 없고 토큰 해시·입력 검증·요청 제한이 걸린 공개 RPC만 쓴다. host 기능은 A·B·C 모든 플랜에 있고, 수치 한도는 plan_limits 키(max_events·max_live_events·max_participants·polls_per_event·retention_days)로 읽는다. 상태는 Realtime Broadcast private 채널로 보내며 송신은 service_role만 한다.",
+  "diagrams": [
+    {
+      "title": "주요 흐름",
+      "mermaid": "flowchart LR\n  H[진행자] --> CE[create_event]\n  CE --> EV[(events)]\n  H --> TP[transition_poll]\n  TP --> PO[(polls)]\n  TP --> PR[(poll_results)]\n  H --> MQ[moderate_question]\n  MQ --> QQ[(qna_questions)]\n  A[청중 anon] --> JE[join_event]\n  JE --> PA[(participants)]\n  A --> CV[cast_vote]\n  CV --> VO[(votes)]\n  A --> AQ[ask_question]\n  AQ --> QQ\n  A --> UQ[upvote_question]\n  UQ --> QU[(qna_upvotes)]\n  JE --> RL[(rate_limits)]\n  W[브로드캐스터] --> CB[collect_broadcasts]\n  CB --> EV\n  CB --> RT[Realtime Broadcast]"
+    },
+    {
+      "title": "행사 상태",
+      "mermaid": "stateDiagram-v2\n  [*] --> draft\n  draft --> live\n  draft --> archived\n  live --> ended\n  ended --> live: 종료 24시간 이내\n  ended --> archived\n  archived --> [*]"
+    }
+  ],
+  "files": {
+    "products/poll/org/0001_poll.sql": {
+      "summary": "스키마 nomad_poll·nomad_poll_private와 표 11개, poll 'host' 기능과 A·B·C 플랜, Realtime Broadcast 읽기 정책, 플랫폼 기본 금칙어를 만든다. 진행자 RPC는 조직 역할로, 청중 RPC는 참가자 토큰(sha256)과 요청 제한으로 보호하며 업무 오류는 {ok:false, code}로 돌려준다. 문항이 닫히면 집계를 poll_results에 확정하고, 보존 기간이 지난 행사는 정리 함수가 지운다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["events", "행사(방), 6자리 입장 코드·상태(draft·live·ended·archived)·설정·최대 참가자, 진행자만 읽기"],
+          ["polls", "행사 안의 투표 문항(단일·복수 선택·평점, 결과 공개 방식), 열린 뒤 내용 변경 금지"],
+          ["poll_options", "문항 선택지(문항당 2~10개, 부모 문항이 draft일 때만 편집)"],
+          ["participants", "무로그인 청중, 토큰 원문은 저장하지 않고 token_hash는 진행자에게도 비노출"],
+          ["votes", "투표 1건(문항·참가자 유니크), cast_vote RPC만 쓴다"],
+          ["poll_results", "문항 종료 시 확정 집계(원본 투표를 지워도 남음)"],
+          ["qna_questions", "청중 질문(pending·visible·answered·hidden·rejected)"],
+          ["qna_upvotes", "질문 추천(1인 1회)"],
+          ["banned_words", "닉네임·질문 금칙어, 조직 목록은 owner·admin, 플랫폼 기본 목록은 service_role"],
+          ["audit_logs", "진행자 작업 감사 기록, owner·admin 읽기"],
+          ["nomad_poll_private.rate_limits", "청중·진행자 요청 제한 카운터(고정 윈도우, 정책 없음)"]
+        ] },
+        { "title": "함수(RPC) · 진행자", "items": [
+          ["create_event(p_org_id, p_title, p_description, p_settings)", "행사 생성(조직당 시간당 30회 제한)"],
+          ["transition_event(p_event_id, p_to)", "행사 상태 전이(ended→live는 종료 24시간 이내)"],
+          ["set_current_poll(p_event_id, p_poll_id)", "발표 화면의 현재 문항 지정(null이면 대기 화면)"],
+          ["transition_poll(p_poll_id, p_to)", "문항 열기·닫기, 열면 같은 행사의 다른 열린 문항을 닫는다"],
+          ["moderate_question(p_question_id, p_to)", "Q&A 질문 상태 변경"],
+          ["block_participant(p_participant_id, p_blocked)", "참가자 차단·해제, 차단하면 그 참가자 질문을 숨긴다"],
+          ["rotate_overlay_key(p_event_id)", "OBS 오버레이 키 재발급(원문은 반환값으로 한 번만)"],
+          ["set_event_passcode(p_event_id, p_passcode)", "입장 비밀번호(4~12자) 설정·해제, 해시로 저장"],
+          ["delete_event(p_event_id)", "행사 소프트 삭제(live면 먼저 종료), 7일 뒤 물리 삭제"],
+          ["host_poll_results(p_poll_id)", "진행자 화면 실시간 집계(공개 설정과 무관)"]
+        ] },
+        { "title": "함수(RPC) · 청중·서버", "items": [
+          ["join_event(p_code, p_token, …)", "anon, 입장 코드·비밀번호로 참가(실패 횟수 제한 PL429)"],
+          ["cast_vote(p_token, p_poll_id, p_option_ids, p_rating)", "anon, 열린 문항에 1회 투표"],
+          ["ask_question(p_token, p_body, p_show_nickname)", "anon, 질문 등록(분당 3회)"],
+          ["upvote_question(p_token, p_question_id)", "anon, 질문 추천"],
+          ["participant_snapshot(p_token)", "anon, 입장·재연결 직후 행사 공개 상태 1회 조회"],
+          ["overlay_snapshot(p_event_id, p_overlay_key)", "anon, OBS 오버레이용 공개 상태"],
+          ["collect_broadcasts(p_limit, p_heartbeat_seconds)", "service_role 브로드캐스터가 보낼 토픽·페이로드를 모은다"],
+          ["purge_expired_events()", "service_role, 매시간 보존 기간 지난 행사 종료·보관·삭제"],
+          ["내부 함수", "요청 제한·금칙어 검사·코드 생성·토큰 해시·집계·공개 상태 생성·감사 기록·상태 전이 트리거"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["조직 격리", "모든 표 RLS, 진행자는 자기 조직+host 기능일 때만 읽기"],
+          ["청중 경로", "anon은 표 권한 없음, 공개 RPC만 실행하고 토큰은 sha256으로만 저장·조회"],
+          ["Realtime", "조직 멤버는 행사 토픽 수신, 청중·오버레이는 서버 발급 단기 JWT의 토픽과 같을 때만, 송신 정책 없음"]
+        ] }
+      ]
+    },
+    "products/poll/org/0002_ai.sql": {
+      "summary": "poll 기능 ai_chat·voice_chat·qna_assist·voice_question·event_wiki를 추가해 A·B·C 전 플랜에 연다. nomad_core.ai_routing_settings가 있을 때만 기능별 라우팅 기본값을 넣고, 청중 원문(질문·음성) 입력 단계는 오픈소스를 강제한다.",
+      "parts": [
+        { "title": "데이터", "items": [
+          ["features·plan_features", "AI 기능 5종, 전 플랜"],
+          ["ai_routing_settings 시드", "chat, poll.moderate·summary·knowledge, wiki.*, dify.aux, voice_question, voice_chat, qna_read_aloud(표가 없으면 건너뜀)"]
+        ] }
+      ]
+    },
+    "products/poll/check_org.sql": { "summary": "조직형 검사: 조직 2곳 교차 접근 거부, owner·editor·viewer 역할, 청중 공개 RPC(anon), 투표·Q&A·차단, 플랜 한도·기능 잠금, 함수 권한, 동기화 컬럼을 합성 데이터로 확인하고 rollback한다." }
+  }
+}

@@ -2,6 +2,116 @@
 
 여러 제품에서 재사용하는 Supabase DB 설계와 SQL입니다. GitHub에는 마이그레이션, 합성 테스트 데이터, 복구 절차를 보관합니다. 고객 데이터 백업은 별도 저장소에서 운영합니다.
 
+## 진행 현황
+
+2026-11-16 기준, 작업 표(`tasks/README.md`)의 task-001~020이 모두 완료되어 `main`에 머지되었습니다.
+
+| 영역 | 상태 | 확인 |
+|---|---|---|
+| 공통 코어 `nomad_core` | 완료 | 코어 테스트 12/12 |
+| 제품 이식본 `products/<slug>/` 28개 | 완료. 27개는 단일·테넌트, hospital은 격리형 | 제품 검사(`run_check.sh`) 28/28 |
+| 배포 번들 `bundles/` 56개 | 단일 27 · 테넌트 27 · 모노레포 1 · 격리형 1 | `tests/bundles.sh` 표본 5/5 |
+| 다른 저장소 설치기 | `products/` 이식본을 설치 | `tests/install_db.sh` 82/0 |
+| 스키마 대시보드 | 분류별 메뉴, 제품 카드, 구조도·ERD, SQL 파일별 설명 | `http://127.0.0.1:8766` |
+| 각 제품 레포 앱 코드에 적용 | 대기 | 제품별 `existing.md`의 "앱 변경" 목록 |
+
+사용자가 결정할 항목:
+- personal 풀이 기록을 서버만 쓰게 할지
+- knowflow 질문 길이 상한과 실패 시 환불 정책
+- 이미 설치된 옛 청사진 정리 방법
+- hospital 보존 기간(법무 확인 필요)
+- news 확인 13건
+- 가격·좌석 수치
+
+전체 목록은 `tasks/NOW.md`에 있습니다.
+
+## 콘텐츠 바로가기
+
+| 문서 | 내용 |
+|---|---|
+| [제품 이식본](products/) | 제품마다 `org/`·`user/` SQL, 검사 SQL, `existing.md`(기존 앱과의 차이), `local-storage.md` |
+| [설치와 통합 — 번들](docs/INTEGRATION.md#번들새-프로젝트에-바로-적용) | 번들을 새 프로젝트에 적용하는 순서 |
+| [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구, 앱 데이터 암호화 키 |
+| [작업 표](tasks/README.md) · [현재 상태](tasks/NOW.md) | 작업 이력과 열린 결정 |
+| [설계 기획](docs/design/00-overview/principles.md) | 원칙·구조·제품별 이식 메모 |
+
+### 제품 DB를 적용하는 방법
+
+SQL 파일을 SQL Editor에 복사해 붙여 넣는 방식은 권하지 않습니다. 파일 순서와 이력이 남지 않기 때문입니다. 대신 아래 두 방법 중 하나를 씁니다.
+
+| 상황 | 방법 |
+|---|---|
+| 새 Supabase 프로젝트 | `bash scripts/build-bundles.sh`로 번들을 만들고 `bundles/<single\|tenant>/<slug>/supabase/migrations/`를 대상 저장소에 넣습니다. 그다음 `npx supabase link`, `npx supabase db push` 순서로 적용합니다. 번들의 `README.md`에 확장과 워커 역할 안내가 있습니다. |
+| 기존 제품 저장소 | `bash scripts/install-db.sh <대상 경로> --product <slug>[:user\|org]`로 실행합니다. 공통 코어와 이식본이 대상의 `supabase/migrations/`에 복사되고 해시가 잠금 파일에 기록됩니다. 그다음 `npx supabase db push`로 적용합니다. |
+
+기존 운영 DB에 이미 같은 이름의 표가 있으면 바로 적용하면 안 됩니다. 제품의 `existing.md`에 적힌 차이와 데이터 이전 절차를 먼저 확인합니다.
+
+## 제품 DB 한눈에 보기
+
+모든 제품은 공통 코어 `nomad_core` 위에 자기 스키마(`nomad_<slug>`)를 하나씩 올립니다. hospital만 예외로, 코어 없이 단독으로 설치하는 격리형입니다.
+
+```mermaid
+flowchart LR
+    subgraph CORE["공통 코어 nomad_core"]
+        ACC["계정·조직·멤버십"]
+        PLAN["A/B/C 플랜·기능 잠금·한도"]
+        OPS["크레딧·작업 큐·감사 로그·레이트 리밋"]
+        AI["AI 계층·API 키(Vault)"]
+    end
+    subgraph PROD["제품 이식본 products/slug/"]
+        USER["user안: 개인 소유"]
+        ORG["org안: 조직 소유"]
+        ISO["isolated: hospital"]
+    end
+    CORE --> USER
+    CORE --> ORG
+    PROD --> BUNDLE["bundles/: 단일 27 · 테넌트 27 · 모노레포 · 격리형"]
+    PROD --> INSTALL["install-db.sh: 기존 저장소에 복사"]
+    BUNDLE --> TARGET[("대상 Supabase 프로젝트")]
+    INSTALL --> TARGET
+    ISO --> BUNDLE
+```
+
+| 분류 | 제품 (클릭하면 SQL 폴더) |
+|---|---|
+| 🎬 콘텐츠·영상 제작 | ✍️ [`contentflow`](products/contentflow/) 블로그 글 기획·검수·승인·발행 관리<br>🎬 [`shorts`](products/shorts/) 쇼핑 숏폼 6단계 제작·발행<br>🎞️ [`sceneflow`](products/sceneflow/) 숏폼·롱폼 영상 제작과 게시 DB<br>📖 [`trailer`](products/trailer/) 원고·책으로 북트레일러 영상을 만드는 DB<br>🎨 [`toon`](products/toon/) 인스타툰·웹툰 제작과 내보내기 |
+| 📰 출판·웹·커뮤니티 | 📰 [`news`](products/news/) 지역신문 뉴스룸·독자 사이트·광고<br>✍️ [`blog`](products/blog/) AI 블로그 원고·다채널 발행·제휴 링크<br>📄 [`docs`](products/docs/) 실무 문서 자동 생성·확정·연동<br>🌸 [`flora`](products/flora/) AI와 함께 책을 쓰고 내보내는 출판 작업 공간<br>💐 [`floria`](products/floria/) 브랜드 사이트 문의·뉴스레터 접수<br>💌 [`microweb`](products/microweb/) 모바일 청첩장 같은 마이크로웹 제작·게시<br>🗳️ [`poll`](products/poll/) 실시간 청중 투표·Q&A DB |
+| 🛒 커머스·동네 거래 | 🛍️ [`commerce`](products/commerce/) 상품DB·AI 상세페이지·마켓 업로드<br>🥕 [`jangter`](products/jangter/) 동네 중고거래 글·채팅·후기<br>🛵 [`baedal`](products/baedal/) 동네 가게 주문·결제·배달 |
+| 🏢 업무·데이터 | 🏢 [`erp`](products/erp/) 회사 재고·판매·인사를 한 DB로<br>📚 [`knowflow`](products/knowflow/) 자료를 모아 묻고 보고서를 만드는 지식 DB<br>📊 [`analytics`](products/analytics/) 데이터셋 업로드부터 분석·보고서까지<br>🏛️ [`arch`](products/arch/) 건축 설계 앱 라이선스·기기·AI 실행 |
+| 🎓 교육·학습 | 🧑‍🏫 [`classroom`](products/classroom/) 교육 과정·자료·퀴즈·사전사후 평가<br>🏫 [`school`](products/school/) 학교 학급·과목·출석 관리<br>📒 [`studynote`](products/studynote/) 원문을 2모델로 정리하는 학습 일지 |
+| 🔮 개인·생활 | 🔮 [`astro`](products/astro/) 사주·타로 리딩과 PDF 발송<br>🔮 [`personal`](products/personal/) 꿈해몽·사주·타로 풀이와 여행 계획<br>🎱 [`lottolab`](products/lottolab/) 로또·연금복권 회차 데이터와 번호 생성<br>📈 [`stock`](products/stock/) 증권 계좌 대시보드·AI 진단·모의주문<br>🎼 [`humscore`](products/humscore/) 악보·찬양 콘티 저장과 공유 링크 |
+| 🏥 의료(격리형) | 🏥 [`hospital`](products/hospital/) 병원 예약·연락·상담 메모 CRM |
+
+제품마다 들어 있는 파일은 아래와 같습니다.
+
+| 파일 | 내용 |
+|---|---|
+| `user/0001_<slug>.sql` | 개인 소유 안(단일 구조). 본인 행만 접근 |
+| `org/0001_<slug>.sql` | 조직 소유 안(테넌트 구조). 조직 멤버·역할별 접근, 플랜별 기능 잠금 |
+| `*/0002_ai.sql`·`0002_storage.sql`·`app/` | AI 라우팅 시드, Storage 버킷, 앱 전용 표 |
+| `check_*.sql`·`run_check.sh` | 합성 데이터로 격리·권한·잠금을 검사하고 롤백 |
+| `existing.md` | 기존 앱 DB와의 차이와 앱에서 바꿀 코드 |
+| `local-storage.md` | 앱 로컬 저장소와의 동기화 설계 |
+
+## 스키마 대시보드
+
+SQL을 직접 읽지 않아도 각 DB가 하는 일을 볼 수 있는 로컬 화면입니다.
+
+```bash
+python scripts/schema-dashboard.py          # bundles/·content/ → data/schema.json
+cd tools/schema-dashboard/docker && DASHBOARD_PORT=8766 docker compose up -d --build
+```
+
+주소는 http://127.0.0.1:8766 입니다.
+
+| 화면 | 보이는 것 |
+|---|---|
+| 왼쪽 메뉴 | 분류 7개를 접고 펼 수 있습니다. 분류 이름을 누르면 카드 화면, 화살표를 누르면 접기·펴기, 제품 이름을 누르면 상세 화면으로 갑니다. 위에 제품 검색이 있습니다. |
+| 분류 화면 | 제품 카드(아이콘·한 줄 소개·형태·표 수)를 모바일 1열·태블릿 2열·데스크톱 3~4열로 보여 줍니다. |
+| 제품·코어 화면 | 개요, 흐름도와 상태도, FK로 자동 생성한 ERD, SQL 파일별 설명(표·함수·보안 규칙)과 원문, 구조별(기존·단일·테넌트·모노레포·격리형) 표 목록이 있습니다. |
+
+설명 원본은 `tools/schema-dashboard/content/`에 있습니다(형식은 그 폴더의 `README.md`). SQL을 바꾸면 해당 제품 JSON도 함께 고칩니다. 구조도는 Mermaid를 CDN에서 불러오므로, 오프라인에서는 원문 텍스트로 보입니다.
+
 ## 시작하기
 
 | 파일 | 사용 목적 |
@@ -9,11 +119,32 @@
 | `supabase/migrations/20261112000100_nomad_core.sql` | 공통 계정 프로필·업체·멤버십·A/B/C 플랜·단품 이용권 |
 | `supabase/migrations/20261112000200_contentflow_example.sql` | ContentFlow 실습용 제품·플랜·업무 테이블 및 RLS |
 | `supabase/migrations/20261114000100_nomad_core_accounts.sql` | 가입 트리거·1인/팀 조직·초대·조직 크레딧 원장 |
+| `supabase/migrations/20261118000100_nomad_core_plan_limits.sql` | 플랜별 수량 한도 `plan_limits`·한도 조회 함수 (값 시드 없음) |
+| `supabase/migrations/20261119000100_nomad_core_profile_prefs.sql` | 프로필 아바타·테마·`touch_updated_at`·소셜 로그인 중계용 `oauth_states` |
+| `supabase/migrations/20261119000150_nomad_core_accounts.sql` | 소셜 가입 이름·사진 반영·익명→정식 전환 프로비저닝 (`--with-accounts`) |
+| `supabase/migrations/20261119000300_nomad_core_accounts.sql` | 내 초대 목록·초대 거절·멤버 역할 변경·내보내기 (`--with-accounts`) |
+| `supabase/migrations/20261119000200_nomad_core_api_credentials.sql` | 조직별 API 키(BYOK) Vault 보관·등록/목록/폐기/서버 복호화 |
+| `supabase/migrations/20261120000100_nomad_core_audit.sql` | 감사 로그 `audit_log`(추가 전용)·`write_audit`·서버 판별 헬퍼 `is_service_caller` |
+| `supabase/migrations/20261120000200_nomad_core_credits.sql` | 크레딧 plan/pack 버킷·consume/refund(멱등·상한)·월 지급/만료(서버 전용) |
+| `supabase/migrations/20261120000300_nomad_core_rate_limit.sql` | 고정 윈도우 레이트 리밋 `rate_limit_hit`·만료 버킷 정리(서버 전용) |
+| `supabase/migrations/20261120000400_nomad_core_jobs.sql` | 작업 큐 `jobs`·클레임/하트비트/재시도·실패·취소 시 크레딧 환불(서버 전용)·`nomad_my_jobs`·`nomad_cancel_job` |
+| `supabase/migrations/20261120000500_nomad_core_ai.sql` | AI 계층(제공자·라우팅·RAG vector(1024)·위키·대화·실행·`ai_usage` cost_krw) — 서버 전용, 사용자 래퍼 없음 |
+| `supabase/migrations/20261120000600_nomad_core_affiliate.sql` | 제휴 링크·클릭·대가성 문구·브랜드커넥트 지원(`brandconnect` 기능 잠금, 조직 일치 복합 FK) |
+| `supabase/migrations/20261120000700_nomad_core_voice.sql` | 음성 세션·작업(제공자·대화 FK, 탈퇴 시 삭제, 녹음 만료 2단계) |
+| `supabase/migrations/20261120000800_nomad_core_followups.sql` | 코어 보완: 결과 전달 표시 `mark_job_delivered`(제품 definer 함수 전용) · 키 폐기 재호출 no-op·서버 호출 허용 |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
-| `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
+| `products/<slug>/` | 제품별 DB 이식본 28개(단일 user안·테넌트 org안·hospital 격리형), 검사 SQL·기존 앱 차이 문서 |
+| `scripts/install-db.sh` | 공통 코어와 제품 이식본(`products/<slug>/`)을 다른 Supabase 저장소로 복사·잠금 기록 (`--product <slug>[:user\|org]`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
-| `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감 검증 |
+| `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감·멤버 관리 검증 |
 | `tests/services_access.sql` | 서비스 11개의 RLS·권한·업체/사용자 격리 검증 |
+| `tests/audit.sql` | 감사 로그 추가 전용·서버만 쓰기·owner/admin 자기 조직 읽기 검증 |
+| `tests/credits.sql` | 크레딧 버킷(plan 먼저→pack)·consume/refund 멱등·환불 상한·월 지급분 만료·서버 전용 검증 |
+| `tests/rate_limit.sql` | 레이트 리밋 한도·윈도우 리셋·긴 윈도우 정리 보존·서버 전용 검증 |
+| `tests/jobs.sql` | 작업 큐 클레임·재시도 백오프·최종 실패/취소 환불(no-op)·reap 반복 안전·사용자 목록/취소 권한 검증 |
+| `tests/ai.sql` | AI 표·함수 사용자 접근 0·라우팅(국외 동의·강제 오픈소스)·벡터 검색 조직 격리·위키 이력 불변 검증 |
+| `tests/affiliate.sql` | 제휴 조직 격리·기능 잠금·클릭 서버 전용·문구 감사·지원서 멱등·상태 전이 검증 |
+| `tests/voice.sql` | 음성 권한·조직 격리·녹음 만료 2단계·탈퇴 삭제·제공자/대화 FK 검증 |
 | [설치와 통합](docs/INTEGRATION.md) | 기존 제품에 가져오는 방법, 기능 이용권 계약 |
 | [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구의 절차 |
 | [`blueprints/`](blueprints/README.md) | 서비스별 DB 청사진 (조직형 7 · 개인형 4 확정, 격리형 2 초안) |
@@ -140,6 +271,9 @@ flowchart TD
 
 실행용 검증은 [테넌트 접근 테스트](tests/tenant_access.sql)에 있습니다.
 
+## 배포 번들
+
+모든 제품을 단일·테넌트 구조로, 우선 5개 제품을 모노레포로, hospital을 격리형으로 묶어 새 Supabase 프로젝트에 바로 적용할 수 있습니다. 만드는 법과 구조 표는 [설치와 제품 연결 — 번들](docs/INTEGRATION.md#번들새-프로젝트에-바로-적용)에 있습니다.
 
 ## 범위
 

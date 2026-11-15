@@ -1,0 +1,27 @@
+# 스키마 대시보드(정적) 로컬 서빙. 실행: docker compose -f tools/schema-dashboard/docker/compose.yml up -d --build
+# 접속: http://127.0.0.1:8765 (기존 581xx·54xxx·8000·8300과 겹치지 않음)
+name: nomad-schema-dashboard
+services:
+  schema-dashboard:
+    build:
+      context: ..                      # tools/schema-dashboard
+      dockerfile: docker/Dockerfile
+    image: nomad/schema-dashboard:0.1.0
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]                    # nginx pid·임시 파일
+    ports: ["127.0.0.1:${DASHBOARD_PORT:-8765}:8080"]   # 로컬 바인딩만
+    volumes:
+      - type: bind
+        source: ../data                # scripts/schema-dashboard.py가 만든 schema.json (재빌드 불필요)
+        target: /usr/share/nginx/html/data
+        read_only: true
+    deploy: {resources: {limits: {memory: 64M, cpus: "0.5"}}}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

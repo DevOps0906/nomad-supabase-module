@@ -1,0 +1,79 @@
+{
+  "slug": "erp",
+  "icon": "🏢",
+  "tagline": "회사 재고·판매·인사를 한 DB로",
+  "overview": "고객사(조직)의 master_admin(조직 owner/admin)과 직원 역할(inventory_manager·sales_manager·staff)이 쓰는 ERP DB다. 부서·임직원 디렉토리, 승인제 가입 요청, 상품·입출고 이력·판매, 감사 기록을 담는다. 플랜 A·B에 workspace 기능이 있어야 접근되고, 엑셀 내보내기(export_xlsx)는 A만 열리며, 구독이 끊기면 C로 취급되어 잠긴다. 재고 수량은 RPC로만 바뀌고 입출고 이력은 append-only이며, 입출고·판매 요청은 request_id로 멱등 처리한다.",
+  "diagrams": [
+    {
+      "title": "가입과 재고·판매 흐름",
+      "mermaid": "flowchart LR\n  Server[서버 service_role] --> RW[register_workspace]\n  RW --> WS[workspaces]\n  RW --> JC[join_codes]\n  User[신청자] --> RJ[request_join]\n  RJ --> JR[join_requests]\n  Admin[master_admin] --> DJ[decide_join_request]\n  DJ --> EMP[employees]\n  DJ --> INV[nomad_core 초대]\n  Inv[inventory_manager] --> RIM[record_inventory_move]\n  RIM --> PR[products.quantity]\n  RIM --> IM[inventory_moves]\n  Sales[sales_manager] --> RS[record_sale]\n  RS --> SA[sales]\n  RS --> IM\n  Sales --> CS[complete_sale / cancel_sale]\n  CS --> SA\n  CS --> IM"
+    },
+    {
+      "title": "판매 상태 전이",
+      "mermaid": "stateDiagram-v2\n  [*] --> pending: record_sale(pending)\n  [*] --> completed: record_sale(completed)\n  pending --> completed: complete_sale\n  pending --> canceled: cancel_sale\n  completed --> canceled: cancel_sale\n  canceled --> [*]"
+    }
+  ],
+  "files": {
+    "products/erp/org/0001_erp.sql": {
+      "summary": "nomad_erp·nomad_erp_private 스키마와 ERP 제품·플랜(A/B/C)·기능(workspace·export_xlsx)을 등록한다. 워크스페이스·부서·임직원·가입 요청·상품·입출고·판매·감사 표와 역할 RPC, 상품 이미지 버킷, Realtime 구독을 만든다.",
+      "parts": [
+        {
+          "title": "표",
+          "items": [
+            ["workspaces", "ERP를 쓰는 조직(고객사)과 기본 안전재고·저재고 알림 설정, 서버가 프로비저닝하고 사용자는 조회만"],
+            ["join_codes", "승인제 가입 코드(8자), 사용자 grant·정책 없음"],
+            ["departments", "부서 트리(parent_id), 조회는 접근자 전원·쓰기는 master_admin"],
+            ["employees", "임직원 디렉토리와 ERP 역할(inventory_manager·sales_manager·staff)·상태, 쓰기는 RPC만"],
+            ["join_requests", "가입 요청(pending→approved·rejected·canceled), 조직당 사용자별 대기 1건"],
+            ["products", "상품(SKU·단가·수량·안전재고·저재고 여부), quantity는 RPC만 바꾸고 소프트 삭제"],
+            ["inventory_moves", "입고·출고·조정·판매·판매취소 이력, append-only"],
+            ["sales", "판매(pending/completed/canceled)와 단가·합계, request_id 멱등"],
+            ["audit_logs", "재고 조정·직원·판매 취소·가입 승인 감사 기록, master_admin만 조회"]
+          ]
+        },
+        {
+          "title": "함수(RPC)",
+          "items": [
+            ["register_workspace(p_organization_id, p_company_name)", "서버 전용, ERP 워크스페이스와 가입 코드를 만든다"],
+            ["get_join_code(p_organization_id) / rotate_join_code(p_organization_id)", "master_admin이 가입 코드를 조회·교체"],
+            ["update_workspace_settings(p_organization_id, …)", "master_admin이 회사명·기본 안전재고·저재고 알림 변경"],
+            ["request_join(p_join_code, p_applicant_name, p_message)", "로그인 사용자가 가입 코드로 요청, 사용자당 10회/시간 제한(ER006), 잘못된·잠긴 코드는 P0002 결과로 반환"],
+            ["cancel_join_request(p_request_id)", "신청자가 자기 대기 요청 취소"],
+            ["decide_join_request(…)", "master_admin이 승인·거절, 승인 시 employees 행과 nomad_core 초대 생성, max_members 초과 시 ER004"],
+            ["set_employee_role / set_employee_status(p_organization_id, p_user_id, …)", "master_admin이 직원 역할·상태 변경, 자기 자신은 불가"],
+            ["update_employee_profile(…)", "master_admin이 직원 이름·부서·직책 등 수정"],
+            ["update_my_contact(p_organization_id, p_phone)", "직원이 자기 연락처 수정"],
+            ["record_inventory_move(…)", "입고·출고·조정 기록, sales_manager는 출고만, 재고 부족 시 ER001, request_id 멱등"],
+            ["record_sale(p_product_id, p_quantity, p_request_id, p_status)", "판매 등록, completed면 재고 원자 차감과 SALE 이력, 단가는 상품 단가 고정"],
+            ["complete_sale(p_sale_id) / cancel_sale(p_sale_id, p_reason)", "대기 판매 완료 또는 판매 취소(사유 필수)"],
+            ["dashboard_metrics(p_organization_id)", "접근 가능한 전원이 보는 대시보드 지표(오늘=KST 자정 기준)"],
+            ["sales_trend(p_organization_id, p_from, p_to, p_bucket)", "판매 추이, 기간 상한은 plan_limits sales_trend_days(없으면 366일)"],
+            ["has_access / has_role / my_role(target_organization, …)", "정책용 도우미: 활성 워크스페이스·workspace 기능·멤버십·역할 판정"],
+            ["내부 트리거", "updated_at 갱신, 입출고 이력 불변, 상품 이미지 경로 검사, 판매·가입 요청 전이 가드, 감사 기록(write_audit)"]
+          ]
+        },
+        {
+          "title": "보안·잠금 규칙",
+          "items": [
+            ["조직 격리", "모든 표 RLS, has_access(활성 워크스페이스+workspace 기능+활성 멤버십+역할)로 같은 조직만"],
+            ["역할별 열람", "상품·이력은 staff 제외, 판매는 inventory_manager·staff 제외, 감사는 master_admin만"],
+            ["상품 이미지", "비공개 버킷 erp-product-images, 경로 <organization_id>/erp/product/, 업로드는 master_admin·inventory_manager"],
+            ["Realtime", "products·inventory_moves·sales를 supabase_realtime 발행에 추가(RLS 적용)"]
+          ]
+        }
+      ]
+    },
+    "products/erp/org/0002_ai.sql": {
+      "summary": "core AI 계층 적용 후 쓰는 ERP AI 기본값이다. service_role만 접근하는 비공개 ai-docs 버킷을 만들고, AI 라우팅 시드는 core 표가 확정되기 전이라 알림만 내고 건너뛴다.",
+      "parts": [
+        {
+          "title": "보안·잠금 규칙",
+          "items": [["ai-docs 버킷", "비공개, 사용자 정책 없음(service_role만), 텍스트·마크다운·PDF·docx 20MB까지"]]
+        }
+      ]
+    },
+    "products/erp/check_org.sql": {
+      "summary": "합성 데이터로 조직 간 교차 접근 거부, 역할별 권한, 승인제 가입, 재고·판매 RPC 멱등, 함수 권한, 동기화 컬럼을 검사한다."
+    }
+  }
+}
