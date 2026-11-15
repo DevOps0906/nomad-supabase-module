@@ -266,3 +266,13 @@ reset role;
 select zz_check.expect($$select count(distinct r::text) from t_join_resp$$, 1);
 select zz_check.expect($$select count(*) from t_join_resp where r = '{"ok": false, "code": "P0002"}'::jsonb$$, 3);
 select zz_check.expect($$select count from nomad_core.rate_limit_buckets where key = 'erp:join:00000000-0000-0000-0000-0000000000a8'$$, 3);
+-- task-019: 구독이 끊긴(기능 잠긴) 조직의 가입 코드도 없는 코드와 글자까지 같은 응답. 시도 횟수에 든다.
+update nomad_core.subscriptions set status = 'inactive' where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'erp';
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000aa', 'aa@example.test');
+select zz_check.login('00000000-0000-0000-0000-0000000000aa');
+insert into t_join_resp select 'locked', nomad_erp.request_join((select v from t_ids where k = 'code_a'), '추측');
+reset role;
+select zz_check.expect($$select count(distinct r::text) from t_join_resp$$, 1);
+select zz_check.expect($$select count(*) from t_join_resp where k = 'locked' and r = '{"ok": false, "code": "P0002"}'::jsonb$$, 1);
+select zz_check.expect($$select count from nomad_core.rate_limit_buckets where key = 'erp:join:00000000-0000-0000-0000-0000000000aa'$$, 1);
+select zz_check.expect($$select count(*) from nomad_erp.join_requests where user_id = '00000000-0000-0000-0000-0000000000aa'$$, 0);

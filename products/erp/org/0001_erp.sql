@@ -474,6 +474,7 @@ $$;
 -- 가입 요청(승인제): 로그인 사용자가 가입 코드로 요청. 입력 검증은 코드·이름 길이·멤버/초대 중복.
 -- 코드 추측 방지: 사용자당 10회/시간(nomad_core.rate_limit_take, 성공·실패 모두 1회). 잘못된 코드·한도 초과는 raise하면
 -- 시도 카운트까지 롤백되므로 결과로 돌려준다: {ok:true, request:{…}} · {ok:false, code:'P0002'(잘못된 코드)} · {ok:false, code:'ER006'(시도 초과), reset_at}.
+-- 정지(suspended)·구독 끊김(기능 잠김) 조직의 코드도 없는 코드와 같은 P0002(존재 노출 금지).
 create function nomad_erp.request_join(p_join_code text, p_applicant_name text, p_message text default null) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -487,7 +488,8 @@ begin
     return jsonb_build_object('ok', false, 'code', 'ER006', 'reset_at', v_rl.reset_at);
   end if;
   select w.organization_id into v_org from nomad_erp.join_codes j join nomad_erp.workspaces w on w.organization_id = j.organization_id
-  where j.join_code = upper(btrim(p_join_code)) and w.status = 'active';
+  where j.join_code = upper(btrim(p_join_code)) and w.status = 'active'
+    and nomad_core.org_has_feature(w.organization_id, 'erp', 'workspace');
   if v_org is null then
     return jsonb_build_object('ok', false, 'code', 'P0002');
   end if;
