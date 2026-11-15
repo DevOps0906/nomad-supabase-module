@@ -30,7 +30,7 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 ## 기존 제품에 적용
 
-1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>]... [--with-accounts] [--with-example]`로 공통 마이그레이션(과 선택한 제품)을 복사합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
+1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>[:user|org]]... [--with-accounts] [--with-example]`로 공통 마이그레이션과 선택한 제품의 이식본(`products/<slug>/`)을 복사합니다. 제품 파일은 `scripts/build-bundles.sh` 번들과 같은 이름·목록이며(`2026120100NNMM_<slug>_<파일>.sql`), 안을 생략하면 `user/`가 있으면 user안, 없으면 org안입니다. 한 제품은 한 안만 설치합니다. 격리형 `hospital`은 공통 코어 없이 단독으로만 설치하며 다른 제품·`--with-accounts`·`--with-example`과 함께 쓰거나 코어가 있는 대상에 설치하면 거부합니다. `supabase/migrations/`의 옛 제품 청사진(`*_<slug>.sql`)은 설치하지 않으며(`--with-example`의 `contentflow_example`만 예외), 대상에 옛 청사진 설치본이 있으면 경고합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
 2. 실습에서는 두 번째 마이그레이션까지 적용합니다. 기존 운영 제품은 별도 제품 키를 등록하고, 기존 업체 ID·사용자 ID·멤버십을 연결하는 추가 마이그레이션을 만듭니다.
 3. 제품별 스키마에는 업무 데이터와 업체 ID를 둡니다. 기존 데이터는 소속을 확정한 뒤 채우고, 조회·쓰기 정책 검증을 완료한 다음 앱 연결을 전환합니다.
 4. Data API를 사용한다면 `public.nomad_dashboard_features`를 통해 대시보드 카탈로그를 조회합니다. 예시 업무 테이블에 Data API가 필요한 실습 환경에서만 `nomad_contentflow_example`을 노출 스키마에 추가합니다. `nomad_core`는 API에 노출하지 않습니다.
@@ -103,4 +103,4 @@ service_role은 RLS를 우회하므로 서버·워커가 유료 기능 테이블
 
 ## 서비스 청사진
 
-연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮기며, 확정된 서비스만 `install-db.sh --product <slug>`로 설치할 수 있습니다(초안은 설치 대상 아님).
+연결 예정 서비스의 DB 설계 초안은 [`blueprints/`](../blueprints/README.md)(조직형 7 · 개인형 4 · 격리형 2)에, 설계 근거는 [`docs/design/`](design/01-architecture/core-schema.md)에 있습니다. 청사진은 정본이 아니며 `supabase/migrations/`·`tests/`를 바꾸지 않습니다. 새 청사진은 `bash scripts/new-blueprint.sh <org|user|isolated> <slug> "<이름>"`, 검증은 `bash scripts/validate-blueprints.sh`로 합니다. 확정되면 `supabase/migrations/`에 날짜 형식 새 파일로 옮기며, `install-db.sh --product <slug>`는 `products/<slug>/` 이식본이 있는 제품만 설치합니다(초안은 설치 대상 아님).

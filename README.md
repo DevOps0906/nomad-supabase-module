@@ -23,7 +23,7 @@
 | `supabase/migrations/20261120000700_nomad_core_voice.sql` | 음성 세션·작업(제공자·대화 FK, 탈퇴 시 삭제, 녹음 만료 2단계) |
 | `supabase/migrations/20261120000800_nomad_core_followups.sql` | 코어 보완: 결과 전달 표시 `mark_job_delivered`(제품 definer 함수 전용) · 키 폐기 재호출 no-op·서버 호출 허용 |
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
-| `scripts/install-db.sh` | 확정 마이그레이션을 다른 Supabase 저장소로 복사·잠금 기록 (`--product`·`--with-accounts`·`--check`) |
+| `scripts/install-db.sh` | 공통 코어와 제품 이식본(`products/<slug>/`)을 다른 Supabase 저장소로 복사·잠금 기록 (`--product <slug>[:user\|org]`·`--with-accounts`·`--check`) |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
 | `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감·멤버 관리 검증 |
 | `tests/services_access.sql` | 서비스 11개의 RLS·권한·업체/사용자 격리 검증 |
