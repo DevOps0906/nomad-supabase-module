@@ -120,7 +120,7 @@
 | D7 | 승인제·초대제 가입(`profiles.status`, `apps.signup_policy`) 도입 여부 | stock·admin-suite |
 | D8 | anon 노출 제품(microweb·news·poll 참가자)의 공개 경로 허용 범위 | 보안 레벨, P2·P4 |
 | D9 | flora·sceneflow·commerce의 저쪽 전용 테이블 채택 범위(특히 sceneflow 29개) | P3 규모 |
-| D10 | local-news 코어 요청 R-1~R-10(독자 인증·테마) 수용 여부 | P4 |
+| D10 | local-news 코어 요청 R-1~R-10(독자 인증·테마) 수용 여부 → **수용 안 함**(2026-11-15 사용자): core 변경 없이 nomad_news만 이식, R-1~R-11은 앱·후속. 세부 N1~N3: [news-port-notes.md](news-port-notes.md) | P4 |
 | D11 | registry: school `isolated`→`org`, `db: supabase-b`→`supabase-a` 변경 승인 | P1 |
 
 - 결정(2026-11-13 사용자): D1 계약만 유지(결제 테이블 이식 안 함) · D2 버킷 분리 채택(plan/pack, 월 지급 만료, 충전팩=addon) · D3 B 정규화 · D6 AI 계층 코어 이식(C5). D4 전부 별도 제품(흡수 안 함) · D5 개인형 제안 제품도 user안·org안 둘 다 · D8 anon은 공개용 RPC만(테이블 직접 접근 금지, 속도 제한) · D9 flora·sceneflow·commerce는 platform-docs 기준으로 products/<slug>/ 새로 작성(청사진은 참고) · D11 school 조직형. 남은 것 D7·D10.
