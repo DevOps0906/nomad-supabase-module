@@ -1,7 +1,8 @@
 # 꿈해몽·사주·여행(personal) 로컬 저장소 설계 (신규 — 연결된 레포가 없어 현재 키 없음)
 
 키 규칙: `nomad.personal.<entity>.v1` (스키마가 바뀌면 `.v2`를 새로 만들고 `.v1`을 지운다). 공통 테마 키: `nomad.theme` = `system` | `light` | `dark`(기본 `system`, 로그인 시 `nomad_core.profiles.theme`과 맞춘다).
-금지: 역할·플랜·사용자 id를 권한 판단용으로 저장하지 않는다. **생년월일·출생시각·꿈 내용(readings.input_json)·풀이 결과는 어디에도 캐시하지 않는다**(민감정보 — 매번 서버에서 읽는다). 비밀(토큰·API 키)은 localStorage·IndexedDB 평문 금지.
+금지: 역할·플랜·사용자 id를 권한 판단용으로 저장하지 않는다. **생년월일·출생시각·풀이 입력(꿈 내용)·풀이 결과는 어디에도 캐시하지 않는다**(민감정보 — 매번 서버에서 읽는다).
+암호화(task-018): 생년월일(birth_profiles.birth_ciphertext)·풀이 입력(readings.input_ciphertext)은 앱 서버가 AES-256-GCM으로 암·복호화한다. 키는 앱 서버 비밀 저장소(환경변수·KMS)에만 있고 클라이언트·로컬 저장소에 두지 않는다. 클라이언트는 암호문 컬럼을 읽을 수 없고(권한 없음) 원문은 서버 API 응답으로만 받아 화면에만 쓴다. 비밀(토큰·API 키)은 localStorage·IndexedDB 평문 금지.
 
 ## 저장 위치
 | 환경 | 일반 데이터(여행) | 설정·테마 | 비밀(세션 토큰) |

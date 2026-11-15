@@ -43,12 +43,13 @@ insert into nomad_core.subscriptions (organization_id, product_code, plan_code, 
 
 -- ==== 0. 서버(service_role) ====
 select zz_check.as_role('service_role');
-insert into nomad_personal.readings (id, user_id, kind, input_json, result_md) values
-  ('00000000-0000-0000-0000-0000000006a1', '00000000-0000-0000-0000-0000000000a1', 'dream', '{"dream":"합성 꿈 a"}', '풀이 a'),
-  ('00000000-0000-0000-0000-0000000006b1', '00000000-0000-0000-0000-0000000000a2', 'saju', '{"birth":"2000-01-01"}', '풀이 b');
-insert into nomad_personal.birth_profiles (user_id, birth_date, birth_time, gender) values
-  ('00000000-0000-0000-0000-0000000000a1', '1990-01-01', '07:30', 'female'),
-  ('00000000-0000-0000-0000-0000000000a2', '1985-05-05', null, 'male');
+-- 암호문은 합성 base64(실제 암호화 아님). 서버가 앱 계층에서 암호화해 넣는다
+insert into nomad_personal.readings (id, user_id, kind, input_ciphertext, key_version, result_md) values
+  ('00000000-0000-0000-0000-0000000006a1', '00000000-0000-0000-0000-0000000000a1', 'dream', repeat('QUJD', 12), 1, '풀이 a'),
+  ('00000000-0000-0000-0000-0000000006b1', '00000000-0000-0000-0000-0000000000a2', 'saju', repeat('REVG', 11) || 'RA==', 1, '풀이 b');
+insert into nomad_personal.birth_profiles (user_id, birth_ciphertext, key_version, gender) values
+  ('00000000-0000-0000-0000-0000000000a1', repeat('QUJD', 10), 1, 'female'),
+  ('00000000-0000-0000-0000-0000000000a2', repeat('REVG', 10), 1, 'male');
 insert into nomad_personal.saved_reports (id, user_id, reading_id, pdf_path) values
   ('00000000-0000-0000-0000-0000000009b1', '00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-0000000006b1', '00000000-0000-0000-0000-0000000000a2/personal/r1.pdf');
 insert into nomad_personal.trips (id, user_id, title) values
@@ -62,6 +63,10 @@ select zz_check.fails_with($$insert into nomad_personal.saved_reports (user_id, 
 select zz_check.fails_with($$insert into nomad_personal.trip_days (user_id, trip_id) values ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000007b1')$$, '23503');
 select zz_check.fails_with($$insert into nomad_personal.saved_reports (user_id, reading_id, pdf_path) values ('00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-0000000006b1', '00000000-0000-0000-0000-0000000000a1/personal/x.pdf')$$, '23514');
 select zz_check.fails_with($$insert into nomad_personal.trips (user_id, title, start_date, end_date) values ('00000000-0000-0000-0000-0000000000a2', 't', '2026-02-02', '2026-02-01')$$, '23514');
+-- 암호문 형식(task-018): 평문 생년월일·사주 입력은 CHECK가 거부, 암호문에는 key_version 필수
+select zz_check.fails_with($$insert into nomad_personal.birth_profiles (user_id, birth_ciphertext, key_version) values ('00000000-0000-0000-0000-0000000000a1', '1990-01-01 07:30', 1)$$, '23514');
+select zz_check.fails_with($$insert into nomad_personal.readings (user_id, kind, input_ciphertext, key_version) values ('00000000-0000-0000-0000-0000000000a1', 'saju', '{"birth":"2000-01-01"}', 1)$$, '23514');
+select zz_check.fails_with($$insert into nomad_personal.readings (user_id, kind, input_ciphertext) values ('00000000-0000-0000-0000-0000000000a1', 'saju', repeat('QUJD', 12))$$, '23514');
 reset role;
 select set_config('request.jwt.claims', '', true);
 
@@ -86,13 +91,21 @@ select zz_check.expect('select count(*) from nomad_personal.trip_days', 0);
 select zz_check.expect($$select nomad_personal.has_access('00000000-0000-0000-0000-0000000000a1', 'divination')::int$$, 1);
 select zz_check.expect($$select nomad_personal.has_access('00000000-0000-0000-0000-0000000000a2', 'divination')::int$$, 0);
 select zz_check.denied($$select nomad_personal.personal_organization('00000000-0000-0000-0000-0000000000a1')$$);
-insert into nomad_personal.readings (kind, input_json) values ('dream', '{"dream":"합성 꿈 a2"}');
+insert into nomad_personal.readings (kind, result_md) values ('dream', '풀이 a2');
+-- 암호문 컬럼은 본인도 읽기·쓰기 불가(서버만), 생년월일 쓰기는 서버만
+select zz_check.denied('select input_ciphertext from nomad_personal.readings');
+select zz_check.denied('select birth_ciphertext from nomad_personal.birth_profiles');
+select zz_check.denied($$insert into nomad_personal.readings (kind, input_ciphertext, key_version) values ('saju', repeat('QUJD', 12), 1)$$);
+select zz_check.denied($$update nomad_personal.readings set input_ciphertext = repeat('QUJD', 12)$$);
+select zz_check.denied($$insert into nomad_personal.birth_profiles (birth_ciphertext, key_version) values (repeat('QUJD', 12), 1)$$);
+select zz_check.denied($$update nomad_personal.birth_profiles set birth_ciphertext = repeat('QUJD', 12)$$);
+select zz_check.denied($$update nomad_personal.birth_profiles set gender = 'male'$$);
+select zz_check.expect('select count(*) from nomad_personal.readings where key_version = 1', 1);
 select zz_check.expect('select count(*) from nomad_personal.readings', 2);
 select zz_check.denied($$insert into nomad_personal.readings (user_id, kind) values ('00000000-0000-0000-0000-0000000000a2', 'dream')$$);
 select zz_check.denied($$insert into nomad_personal.readings (id, kind) values (gen_random_uuid(), 'dream')$$);
 select zz_check.denied($$update nomad_personal.readings set user_id = '00000000-0000-0000-0000-0000000000a2'$$);
 select zz_check.expect($$with u as (update nomad_personal.readings set result_md = 'x' where user_id = '00000000-0000-0000-0000-0000000000a2' returning 1) select count(*) from u$$, 0);
-select zz_check.expect($$with u as (update nomad_personal.birth_profiles set birth_time = '08:00' returning 1) select count(*) from u$$, 1);
 select zz_check.expect($$with d as (delete from nomad_personal.readings where id = '00000000-0000-0000-0000-0000000006b1' returning 1) select count(*) from d$$, 0);
 select zz_check.expect($$with d as (delete from nomad_personal.birth_profiles where user_id = '00000000-0000-0000-0000-0000000000a2' returning 1) select count(*) from d$$, 0);
 select zz_check.denied($$insert into nomad_personal.saved_reports (reading_id) values ('00000000-0000-0000-0000-0000000006a1')$$);
@@ -108,7 +121,7 @@ select zz_check.expect('select count(*) from nomad_personal.birth_profiles', 1);
 select zz_check.expect('select count(*) from nomad_personal.saved_reports', 1);
 select zz_check.expect('select count(*) from nomad_personal.trips', 1);
 select zz_check.expect('select count(*) from nomad_personal.trip_days', 1);
-select zz_check.expect($$select count(*) from nomad_personal.readings where input_json->>'dream' = '합성 꿈 a'$$, 0);
+select zz_check.expect($$select count(*) from nomad_personal.readings where id = '00000000-0000-0000-0000-0000000006a1'$$, 0);
 insert into nomad_personal.trips (title, start_date, end_date) values ('새 여행', '2026-03-01', '2026-03-03');
 insert into nomad_personal.trip_days (trip_id, day, tools) values ('00000000-0000-0000-0000-0000000007b1', 'day2', '{"weather":"맑음"}');
 insert into nomad_personal.saved_reports (reading_id, pdf_path) values ('00000000-0000-0000-0000-0000000006b1', '00000000-0000-0000-0000-0000000000a2/personal/r2.pdf');
@@ -160,4 +173,7 @@ select zz_check.expect($$select count(*) from pg_tables where schemaname = 'noma
 select zz_check.expect($$select count(*) from pg_tables where schemaname = 'nomad_personal' and not rowsecurity$$, 0);
 select zz_check.expect($$select count(*) from information_schema.role_table_grants where table_schema = 'nomad_personal' and grantee = 'anon'$$, 0);
 select zz_check.expect($$select count(*) from information_schema.column_privileges where table_schema = 'nomad_personal' and grantee = 'authenticated' and privilege_type in ('INSERT', 'UPDATE') and column_name in ('id', 'user_id', 'created_at', 'updated_at')$$, 0);
+-- 평문 생년월일·사주 입력 컬럼 없음, 암호문 컬럼은 authenticated 권한 없음(쓰기·복호화는 서버만)
+select zz_check.expect($$select count(*) from information_schema.columns where table_schema = 'nomad_personal' and column_name in ('birth_date', 'birth_time', 'input_json')$$, 0);
+select zz_check.expect($$select count(*) from information_schema.column_privileges where table_schema = 'nomad_personal' and grantee = 'authenticated' and column_name like '%ciphertext'$$, 0);
 select zz_check.expect($$select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'nomad_personal' and p.prosecdef and not coalesce(array_to_string(p.proconfig, ',') like '%search_path=""%', false)$$, 0);

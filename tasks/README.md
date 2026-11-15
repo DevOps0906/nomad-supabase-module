@@ -20,8 +20,9 @@
 
 | task-016 | erp 가입 코드 무차별 시도 제한(값 반환 + rate_limit_take) | W3 | task-015 | 높음 | builder | 완료(구현은 cbf1ccd, 응답 동일성 검사 추가) |
 | task-017 | knowflow 질문·보고서 쿼터 차감 멱등 RPC(ask_question·create_report, 실패 환불, 서버 직접 insert 차단) | W3 | task-007 | 높음 | builder | 진행 |
-| task-018 | personal 생년월일·사주 입력 암호문 전환(astro 방식, 풀이 결과는 평문) | W3 | task-015 | 높음 | builder | 진행 |
+| task-018 | personal 생년월일·사주 입력 암호문 전환(astro 방식, 풀이 결과는 평문) | W3 | task-015 | 높음 | builder | 완료(readings 쓰기 서버 전용 여부는 결정 대기) |
 | task-019 | erp 구독 끊긴 조직 가입 코드 거부(없는 코드와 같은 P0002 응답) | W3 | task-016 | 보통 | builder | 완료 |
+| task-020 | install-db.sh --product를 청사진 대신 products/<slug> 이식본 설치로(보안 리뷰 전 청사진 배포 차단) | W3 | task-013 | 높음 | builder | 진행 |
 상태: 대기 / 진행 / 완료 / 보류
 
 ## 발견한 문제 (범위 밖 — 나중 작업 후보)
@@ -32,7 +33,7 @@
 | 2026-11-13 | lottolab org안 | 계정 삭제 시 1인 조직 정리 필요 | 데이터 이전·계정 삭제 작업에서 |
 | 2026-11-13 | 제품 레포 앱 코드 | public → nomad_<slug> 스키마 지정(Accept-Profile·.schema()), 일부 이름 변경, ContentFlow 키워드 upsert → 조회 후 insert/update | 각 레포 적용 작업(existing.md 대응표 기준) |
 | 2026-11-13 | erp request_join | 가입 코드 무차별 시도 제한 없음(core rate_limit_hit은 서버 전용, 오류는 raise라 카운트 롤백) | 해결: cbf1ccd(값 반환·사용자당 10회/시간) + task-016 응답 동일성 검사. IP 제한은 Route Handler |
-| 2026-11-14 | 청사진 flora·sceneflow·commerce | supabase/migrations의 청사진(nomad_flora·nomad_sceneflow·nomad_commerce)과 products/ 이식본이 같은 스키마 이름 — 로컬 실습 DB에 청사진 기능 행이 남음 | 해결(2026-11-16): 운영 반영은 번들로만 하고 번들은 청사진 제품 파일을 넣지 않는다. supabase/migrations 청사진은 로컬 실습·core 테스트(services_access·feature_gating) 전용으로 유지 |
+| 2026-11-14 | 청사진 flora·sceneflow·commerce | supabase/migrations의 청사진(nomad_flora·nomad_sceneflow·nomad_commerce)과 products/ 이식본이 같은 스키마 이름 — 로컬 실습 DB에 청사진 기능 행이 남음 | 부분 해결(2026-11-16): 번들은 청사진을 넣지 않음. 단 install-db.sh --product가 청사진을 설치하고 있었음(personal 평문 생년월일 등) → task-020에서 products/ 기준으로 수정 중. 청사진은 로컬 실습·core 테스트 전용 |
 
 ## 교훈 (다음 작업에 그대로 적용할 것만, 20줄 이내 유지)
 - 

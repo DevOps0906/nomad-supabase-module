@@ -15,12 +15,12 @@
 ## 테이블 (5개, 이름 유지)
 | 원래 이름 | 분류 | 새 이름 | 사용처 | 소유 컬럼 user→org | 기능 |
 |---|---|---|---|---|---|
-| readings | 이관(+updated_at) | nomad_personal.readings | 웹(풀이 기록) · 서버(AI 결과) | user_id → organization_id + created_by. **작성자만 열람**(owner/admin도 못 봄) | divination |
+| readings | 이관(+updated_at, input_json → input_ciphertext·key_version 암호문) | nomad_personal.readings | 웹(풀이 기록) · 서버(AI 결과, 입력 암·복호화) | user_id → organization_id + created_by. **작성자만 열람**(owner/admin도 못 봄) | divination |
 | saved_reports | 이관 | nomad_personal.saved_reports | 웹 · 서버(PDF) | 같음. 복합 FK가 같은 조직·같은 작성자의 풀이만 허용. pdf_path 접두 `<user_id>/personal/` · `<organization_id>/personal/<created_by>/`, org안 pdf_path는 서버만 기록(사용자 권한 없음) | report_save |
-| birth_profiles | 이관(+updated_at) | nomad_personal.birth_profiles | 웹(사주 입력) | PK user_id → (organization_id, user_id). 본인만 | divination |
+| birth_profiles | 이관(+updated_at, birth_date·birth_time → birth_ciphertext·key_version 암호문, 쓰기 서버만) | nomad_personal.birth_profiles | 웹(읽기·삭제) · 서버(암·복호화·쓰기) | PK user_id → (organization_id, user_id). 본인만 | divination |
 | trips | 이관(+updated_at, 날짜 역전 CHECK) | nomad_personal.trips | 웹(여행 일정) | user_id → organization_id + created_by. **조직 공유**: 멤버 읽기, owner/admin/editor 쓰기 | trip_planner |
 | trip_days | 이관(+소유 컬럼, +updated_at) | nomad_personal.trip_days | 웹 | 원본은 소유 컬럼 없음(부모 조인 정책) → user_id / organization_id + 복합 FK (소유, trip_id). trip_id not null | trip_planner |
-- 사용자 컬럼 권한: id·소유·작성자(기본값 auth.uid())·시각 컬럼은 insert·update 권한 없음, 조직·부모 참조(organization_id·trip_id·reading_id)는 insert만. org안 saved_reports.pdf_path는 권한 없음(서버가 PDF 생성 후 기록).
+- 사용자 컬럼 권한: 암호문 컬럼(birth_ciphertext·input_ciphertext)은 select·insert·update 모두 없음(birth_profiles는 사용자 쓰기 없음, 읽기·삭제만). id·소유·작성자(기본값 auth.uid())·시각 컬럼은 insert·update 권한 없음, 조직·부모 참조(organization_id·trip_id·reading_id)는 insert만. org안 saved_reports.pdf_path는 권한 없음(서버가 PDF 생성 후 기록).
 - 동기화 컬럼: updated_at(touch 트리거) + (소유, updated_at) 인덱스 — readings·birth_profiles·trips·trip_days. 소프트 삭제 없음(개인정보는 물리 삭제).
 
 ## 함수
@@ -37,17 +37,30 @@
 | 영역 | personal | astro | 차이 |
 |---|---|---|---|
 | 사주·타로 풀이 | readings(kind dream·saju·tarot, input_json·result_md) | readings(saju·tarot·combined, 상태 전이·크레딧·작업) | personal은 단순 기록(웹이 직접 씀), astro는 크레딧 과금·작업 큐·PDF 렌더 파이프라인 |
-| 생년월일 | birth_profiles(평문, 사용자당 1행) | subjects(앱 계층 암호문, 본인·가족·지인 여러 명, 제3자 동의) | personal 평문 저장은 아래 확인 1 |
+| 생년월일 | birth_profiles(앱 계층 암호문, 사용자당 1행) | subjects(앱 계층 암호문, 본인·가족·지인 여러 명, 제3자 동의) | 같은 방식(task-018). personal은 형식 CHECK 추가 |
 | PDF | saved_reports.pdf_path | reading_renders(테마·렌더 이력·발송) | — |
 | 꿈해몽·여행 | 있음 | 없음 | personal만 |
 | 기능·플랜 | divination(C) · report_save·trip_planner(B·A) | reading(A·B·C) + AI 기능 | 같은 사용자가 두 제품을 쓰면 생년월일을 두 번 입력 |
+
+## 암호화 (task-018, 2026-11-16 사용자 결정 — astro 방식): 입력 암호화, 결과 평문(재수록 금지 계약)
+| 항목 | 내용 |
+|---|---|
+| 대상 | birth_profiles.birth_ciphertext(생년월일·출생시각·필요 시 출생지, not null) · readings.input_ciphertext(풀이 입력 JSON, 없으면 null). 풀이 결과 result_md·성별·kind는 평문 |
+| 누가 | 앱 서버(service_role)만 암·복호화하고 쓴다. 웹은 원문을 서버 API로 보내고, DB에서는 암호문 컬럼을 읽을 수 없다(권한 없음) |
+| 방식 | AES-256-GCM, 행마다 새 iv. 저장 형식 base64(iv 12바이트 ‖ 암호문 ‖ 태그 16바이트) = 최소 40자·4의 배수. 형식 CHECK(23514)는 날짜·JSON 원형만 거부한다 — 실제 암호화 여부는 DB가 못 보므로 방어선은 서버 암·복호화 왕복 테스트 |
+| AAD | 암호문을 다른 행·열로 옮겨 붙이지 못하게 AAD에 소유자 id·행 id·열 이름을 넣는다. birth_profiles: user안 `user_id`, org안 `organization_id`+`user_id`(행 키), 열 `birth_ciphertext`. readings: user안 `user_id`+`id`, org안 `organization_id`+`created_by`+`id`, 열 `input_ciphertext` → 서버는 id를 먼저 정하고(service_role이 id 지정 insert) 암호화한다 |
+| 재수록 금지 | 서버는 result_md·PDF(saved_reports)에 생년월일·사주 원국 입력을 다시 싣지 않는다. 결과는 평문이므로 입력을 옮겨 적으면 암호화가 무의미해진다(앱 계약, DB가 막지 못함) |
+| 키 위치 | 앱 서버 비밀 저장소(배포 환경변수·KMS). DB·저장소·클라이언트에 두지 않는다. 키 백업은 비밀 관리 도구의 별도 보관(DB 백업과 다른 위치·권한), 절차 `docs/BACKUP_RESTORE.md` "앱 데이터 암호화 키" |
+| 키 교체 | key_version(>0) N으로 새 키 사용 → 옛 버전 행은 서버가 다시 암호화. 완료 확인: `select (select count(*) from nomad_personal.birth_profiles where key_version < N) + (select count(*) from nomad_personal.readings where key_version < N);` = 0. 옛 키는 0이 된 뒤에도 최소 DB 백업 보존 기간만큼 보존(옛 백업 복구용) 후 폐기 |
+| 앱 변경 | 열 단위 select 권한이라 웹의 `select *`·`returning *`(supabase-js `.select()` 인자 없음 포함)는 권한 오류 → 열을 명시한다(readings: id·kind·key_version·result_md·시각, birth_profiles: user_id·key_version·gender·updated_at) |
+| 검사 | `run_check.sh` user·org: 평문 컬럼 부재, 암호문 컬럼 authenticated 권한 0, 형식 CHECK·key_version 필수 거부 |
 
 ## 교훈 반영
 core 표 직접 쓰기·트리거 없음(감사는 write_audit) · 참조 조직 일치(복합 FK) · 사용자 경로 조직(소유) 접두 CHECK · 사용자 insert에 id 권한 없음 · 구독 끊김 = 잠김, 개인정보 삭제만 예외(RPC) · 공개분 없음(anon 0) · 수치 한도 키 없음 · definer 함수는 set search_path = '' 이고 행을 반환하지 않음(삭제 행 수만).
 해당 없음: 결과 저장 잡(jobs·mark_job_delivered) — 기존에 작업·크레딧 연결이 없다(확인 3) · 결제 이벤트 · 공개 읽기 RPC · BEFORE 검사 트리거(touch만).
 
 ## 팀장 확인 필요
-1. 평문 저장: birth_profiles.birth_date·birth_time(청사진 주석 "암호화는 앱·서버 책임")과 readings.input_json(꿈 내용·생년월일 입력)·result_md(풀이 결과)가 모두 평문이다. astro처럼 서버 암호문 컬럼으로 바꿀지.
+1. 평문 저장 → task-018: 입력 암호화, 결과 평문(재수록 금지 계약 — 위 "암호화" 장, 사용자 결정). 남은 확인: 사용자 직접 쓰기는 readings(kind·result_md)만 남았다 — 입력이 서버 경유가 되므로 readings 쓰기도 서버 전용으로 할지(확인 3과 함께).
 2. org안 민감 표를 작성자만 열람하게 했다(owner/admin은 열람 불가, erase로 탈퇴자 것만 삭제). 여행은 조직 공유. 범위가 맞는지.
 3. AI 풀이 결과(result_md)를 사용자가 직접 쓴다(청사진 그대로). 서버 작업(nomad_core.jobs)·크레딧 과금으로 바꿀지 — 바꾸면 결과 저장 교훈(실패 잡 거부·mark_job_delivered) 적용 필요.
 4. org안 viewer도 본인 풀이·생년월일은 쓸 수 있다(개인 자료). 여행은 viewer 읽기만.

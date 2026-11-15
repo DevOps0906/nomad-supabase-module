@@ -3,6 +3,7 @@
 -- 민감(풀이·리포트·생년월일): 읽기·쓰기·삭제는 작성자 본인만(멤버이고 이용권이 있을 때). owner/admin은 열람 없이 erase_personal_data로 탈퇴자 것만 삭제.
 -- 여행(trips·trip_days): 조직 공유 — 멤버 읽기, owner/admin/editor 쓰기. 잠김(구독 끊김·조직 비활성)이면 모두 잠그고 erase_personal_data(개인정보 삭제)만 연다.
 -- 사주 영역이 nomad_astro와 겹치지만 별도 제품(D4). 대응표: products/personal/existing.md
+-- 생년월일·풀이 입력은 앱 서버가 AES-256-GCM으로 암호화한 암호문만 저장(astro 방식, task-018). 암호문 컬럼은 authenticated 권한 없음 = 쓰기·복호화는 서버만. 풀이 결과(result_md)는 평문.
 -- 전제: nomad_core.touch_updated_at() (core 20261119000100). 되돌림: drop schema nomad_personal cascade;
 begin;
 
@@ -24,19 +25,23 @@ insert into nomad_core.plan_features (product_code, plan_code, feature_code) val
   ('personal', 'B', 'trip_planner'), ('personal', 'A', 'trip_planner')
 on conflict do nothing;
 
--- ---------- 1. readings: 꿈·사주·타로 풀이 (작성자만) ----------
+-- ---------- 1. readings: 꿈·사주·타로 풀이 (작성자만, 입력은 암호문) ----------
+-- 암호문 형식: base64(iv 12바이트 + 암호문 + 태그 16바이트) → 최소 40자, 4의 배수. 이 CHECK는 날짜·JSON 원형만 거부한다(실제 암호화 여부는 못 본다 — 방어선은 서버 암·복호화 왕복 테스트).
 create table nomad_personal.readings (
-  id              uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references nomad_core.organizations(id) on delete cascade,
-  created_by      uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  kind            text not null default 'dream' constraint readings_kind_check check (kind in ('dream', 'saju', 'tarot')),
-  input_json      jsonb,
-  result_md       text,
-  created_at      timestamptz not null default now(),
-  updated_at      timestamptz not null default now(),
-  constraint readings_org_author_id_uniq unique (organization_id, created_by, id)
+  id               uuid primary key default gen_random_uuid(),
+  organization_id  uuid not null references nomad_core.organizations(id) on delete cascade,
+  created_by       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  kind             text not null default 'dream' constraint readings_kind_check check (kind in ('dream', 'saju', 'tarot')),
+  input_ciphertext text constraint readings_input_ciphertext_check check (input_ciphertext ~ '^[A-Za-z0-9+/]{38,}={0,2}$' and char_length(input_ciphertext) % 4 = 0),
+  key_version      smallint constraint readings_key_version_check check (key_version > 0),
+  result_md        text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  constraint readings_org_author_id_uniq unique (organization_id, created_by, id),
+  constraint readings_input_key_check check ((input_ciphertext is null) = (key_version is null))
 );
-comment on table nomad_personal.readings is '꿈·사주·타로 풀이 기록. input_json(꿈 내용 등)은 민감정보 — 작성자만 열람.';
+comment on table nomad_personal.readings is '꿈·사주·타로 풀이 기록. 입력(꿈 내용·생년월일)은 서버 암호문만 — 작성자만 열람. 풀이 결과는 평문.';
+comment on column nomad_personal.readings.input_ciphertext is '풀이 입력 JSON의 AES-256-GCM 암호문(앱 서버가 암·복호화, 키는 서버 비밀 저장소). 사용자 권한 없음';
 comment on column nomad_personal.readings.kind is 'dream=꿈, saju=사주, tarot=타로';
 create index readings_org_author_created_idx on nomad_personal.readings (organization_id, created_by, created_at desc);
 create index readings_org_updated_idx on nomad_personal.readings (organization_id, updated_at);
@@ -62,15 +67,14 @@ create index saved_reports_author_idx on nomad_personal.saved_reports (created_b
 create table nomad_personal.birth_profiles (
   organization_id uuid not null references nomad_core.organizations(id) on delete cascade,
   user_id         uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  birth_date      date,
-  birth_time      text,
+  birth_ciphertext text not null constraint birth_profiles_birth_ciphertext_check check (birth_ciphertext ~ '^[A-Za-z0-9+/]{38,}={0,2}$' and char_length(birth_ciphertext) % 4 = 0),
+  key_version     smallint not null constraint birth_profiles_key_version_check check (key_version > 0),
   gender          text,
   updated_at      timestamptz not null default now(),
   primary key (organization_id, user_id)
 );
-comment on table nomad_personal.birth_profiles is '조직 안 사용자별 생년월일·성별. 본인만 읽고 쓴다(owner/admin은 삭제만).';
-comment on column nomad_personal.birth_profiles.birth_date is '평문 저장. 암호화는 앱·서버 책임(이 마이그레이션은 암호화하지 않음)';
-comment on column nomad_personal.birth_profiles.birth_time is '평문 저장. 암호화는 앱·서버 책임(이 마이그레이션은 암호화하지 않음)';
+comment on table nomad_personal.birth_profiles is '조직 안 사용자별 생년월일·성별. 본인만 읽고 삭제(owner/admin은 탈퇴자 것 삭제만). 쓰기는 서버만(암호화가 서버에서만 가능).';
+comment on column nomad_personal.birth_profiles.birth_ciphertext is '생년월일·출생시각 AES-256-GCM 암호문(앱 서버가 암·복호화, 키는 서버 비밀 저장소). 사용자 권한 없음';
 create index birth_profiles_user_idx on nomad_personal.birth_profiles (user_id);
 
 -- ---------- 4. trips · trip_days: 여행 계획(조직 공유) ----------
@@ -125,7 +129,7 @@ begin
     execute format('alter table nomad_personal.%I enable row level security', t);
     execute format('revoke all on table nomad_personal.%I from public, anon, authenticated', t);
     execute format('grant all on table nomad_personal.%I to service_role', t);
-    execute format('grant select, delete on table nomad_personal.%I to authenticated', t);
+    execute format('grant delete on table nomad_personal.%I to authenticated', t);
   end loop;
 end $$;
 
@@ -165,10 +169,13 @@ alter policy trips_insert on nomad_personal.trips
               and nomad_core.organization_role(organization_id) in ('owner', 'admin', 'editor'));
 
 -- 사용자 컬럼 권한: id·작성자(기본값 auth.uid())·시각 컬럼 제외, 조직·부모 참조는 추가 때만
-grant insert (organization_id, kind, input_json, result_md), update (kind, input_json, result_md) on nomad_personal.readings to authenticated;
+-- 암호문 컬럼은 읽기·쓰기 모두 없음(서버만). birth_profiles 쓰기는 서버만
+grant select (id, organization_id, created_by, kind, key_version, result_md, created_at, updated_at) on nomad_personal.readings to authenticated;
+grant select on nomad_personal.saved_reports, nomad_personal.trips, nomad_personal.trip_days to authenticated;
+grant select (organization_id, user_id, key_version, gender, updated_at) on nomad_personal.birth_profiles to authenticated;
+grant insert (organization_id, kind, result_md), update (kind, result_md) on nomad_personal.readings to authenticated;
 -- saved_reports.pdf_path는 서버(PDF 생성)만 기록한다(사용자 권한 없음 — 같은 조직 다른 작성자 경로 지정 차단)
 grant insert (organization_id, reading_id) on nomad_personal.saved_reports to authenticated;
-grant insert (organization_id, birth_date, birth_time, gender), update (birth_date, birth_time, gender) on nomad_personal.birth_profiles to authenticated;
 grant insert (organization_id, title, start_date, end_date), update (title, start_date, end_date) on nomad_personal.trips to authenticated;
 grant insert (organization_id, trip_id, day, plan_json, tools), update (day, plan_json, tools) on nomad_personal.trip_days to authenticated;
 

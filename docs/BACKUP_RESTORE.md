@@ -11,6 +11,13 @@
 
 Git에 보관하는 것은 구조와 합성 예제입니다. 실제 고객 덤프, 인증·결제 데이터, API 키와 토큰은 Git에 올리지 않습니다. Supabase DB 백업에는 Storage API 객체의 본문이 포함되지 않으므로 파일은 별도로 보존합니다.
 
+## 앱 데이터 암호화 키 (personal·astro)
+
+personal(`birth_ciphertext`·`input_ciphertext`)과 astro(`*_ciphertext`)는 앱 서버가 AES-256-GCM으로 암호화해 저장합니다. 키가 없으면 DB 백업을 복구해도 해당 열을 읽을 수 없습니다.
+- 백업: 키는 비밀 관리 도구(KMS·배포 비밀)에 두고, DB 백업과 다른 위치·권한으로 별도 백업합니다. Git·DB·클라이언트에는 두지 않습니다.
+- 버전: 행의 `key_version`으로 어떤 키인지 찾습니다. 키를 바꾼 뒤 옛 키는 재암호화가 끝나고(`key_version < N` 건수 0)도 최소 DB 백업 보존 기간만큼 보존한 뒤 폐기합니다.
+- 복구: DB를 복원한 시점의 `key_version` 목록(`select distinct key_version …`)에 해당하는 키가 모두 있는지 먼저 확인하고, 서버에서 표본 행 복호화로 검증합니다.
+
 ## 복구 연습
 
 1. 복원 대상 제품과 DB 백업 시각, Git 커밋, 객체 백업 시각을 기록합니다.
