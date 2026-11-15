@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """스키마 대시보드 데이터 생성기 (표준 라이브러리만).
 
-core(supabase/migrations/*nomad_core*.sql) · products/<slug>/{user,org,app}/*.sql · 각 레포 기존 migrations ·
+core(supabase/migrations/*nomad_core*.sql) · products/<slug>/{user,org,app,isolated}/*.sql · 각 레포 기존 migrations ·
 bundles/ 를 읽어 tools/schema-dashboard/data/schema.json 과 data/bundles/*.sql 을 만든다. 읽기만 한다(원본 수정 없음).
 실행: python scripts/schema-dashboard.py [--out <schema.json>]
 레포 위치: 기본 D:\\WorkSpace\\DEV (환경 변수 NOMAD_DEV_ROOT로 변경). 비밀 패턴이 출력에 있으면 실패한다.
@@ -503,7 +503,7 @@ def discover_products():
     반환: [(slug, 이름, 레포 표기, 형태, 사용처, 기존 SQL 경로 목록, 기존 경로 표기 함수)]"""
     known = {k[0]: k for k in KNOWN}
     slugs = [k[0] for k in KNOWN] + sorted(d.name for d in (ROOT / "products").iterdir()
-                                           if d.is_dir() and d.name not in known and any((d / x).is_dir() for x in ("user", "org", "app")))
+                                           if d.is_dir() and d.name not in known and any((d / x).is_dir() for x in ("user", "org", "app", "isolated")))
     out = []
     for slug in slugs:
         if slug in known:
@@ -519,7 +519,7 @@ def discover_products():
         head = read(md) if md.exists() else ""
         m = re.search(r"^#\s+(.+?)\s+기존 DB", head, re.M)
         name = m.group(1).strip() if m else slug
-        form = "user" if (ROOT / "products" / slug / "user").is_dir() else "org"
+        form = "isolated" if (ROOT / "products" / slug / "isolated").is_dir() else "user" if (ROOT / "products" / slug / "user").is_dir() else "org"
         clients = ["web"] + (["worker"] if "워커=" in head else [])
         src, repo = [], "-"
         m = re.search(r"^원본:\s*`([^`]+)`", head, re.M)
@@ -581,9 +581,10 @@ def main():
         app = sql_files(pdir / "app")
         single_files = build_files("single", sql_files(pdir / "user") + app)
         tenant_files = build_files("tenant", sql_files(pdir / "org") + app)
+        isolated_files = build_files("isolated", sql_files(pdir / "isolated"))
         mono_files = build_files("monorepo", [p for p in sql_files(ROOT / "bundles" / "monorepo" / "supabase" / "migrations") if f"_{slug}_" in p.name])
         variants, files = {}, []
-        for key, fl in (("existing", ex_files), ("single", single_files), ("tenant", tenant_files), ("monorepo", mono_files)):
+        for key, fl in (("existing", ex_files), ("single", single_files), ("tenant", tenant_files), ("monorepo", mono_files), ("isolated", isolated_files)):
             tabs = finish_tables(schema_from(fl), renames=None if key == "existing" else renames)
             variants[key] = {"tables": tabs}
             files.extend(fl)
@@ -595,7 +596,7 @@ def main():
     bundle_texts = {}
     for structure, slug, folder in [("single", p[0], ROOT / "bundles" / "single" / p[0]) for p in products] + \
                                    [("tenant", p[0], ROOT / "bundles" / "tenant" / p[0]) for p in products] + \
-                                   [("monorepo", None, ROOT / "bundles" / "monorepo")]:
+                                   [("isolated", p[0], ROOT / "bundles" / "isolated" / p[0]) for p in products] +                                    [("monorepo", None, ROOT / "bundles" / "monorepo")]:
         files = sorted((folder / "supabase" / "migrations").glob("*.sql"))
         if not files:
             continue

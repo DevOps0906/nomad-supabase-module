@@ -1,6 +1,6 @@
 "use strict";
 // 정적 대시보드. 데이터: data/schema.json(생성기 scripts/schema-dashboard.py) 우선, 없으면 sample-data.json — ?data=<경로> 로 지정. 사용자 데이터는 textContent로만 넣는다.
-const VARIANTS = [["existing", "기존"], ["single", "단일"], ["tenant", "테넌트"], ["monorepo", "모노레포"], ["local", "로컬 저장소"]];
+const VARIANTS = [["existing", "기존"], ["single", "단일"], ["tenant", "테넌트"], ["monorepo", "모노레포"], ["isolated", "격리형"], ["local", "로컬 저장소"]];
 const OWNERS = { user: "user", org: "org", public: "공개", server: "서버", indirect: "간접" };
 const CLIENTS = { web: "웹", app: "앱", desktop: "데스크톱", worker: "워커" };
 const THEME_KEY = "nomad.theme";
@@ -271,7 +271,7 @@ function viewCore(r) {
 }
 
 // 제품 SQL 카드: 구조별 묶음(맨 앞 = 그 구조 합본) + 앱 공통(app) + 번들(구조별 전체 SQL, 열 때 불러옴)
-const STRUCT_GROUPS = [["existing", "기존 (원본)"], ["single", "단일 (user)"], ["tenant", "테넌트 (org)"], ["app", "앱 공통 (app)"], ["monorepo", "모노레포"]];
+const STRUCT_GROUPS = [["existing", "기존 (원본)"], ["single", "단일 (user)"], ["tenant", "테넌트 (org)"], ["app", "앱 공통 (app)"], ["monorepo", "모노레포"], ["isolated", "격리형 (isolated)"]];
 function productSqlCards(p) {
   const isApp = (f) => f.path.includes("/" + p.slug + "/app/");
   const seen = new Set();
@@ -324,7 +324,7 @@ function viewProduct(r) {
     if (!tables.length) host.replaceChildren(h("div", { class: "empty" }, "이 구조는 아직 정리되지 않았습니다."));
   }
   return [
-    h("div", { class: "page-head" }, h("h2", {}, p.name), badge(p.form === "org" ? "org형" : "user형", "accent"), (p.clients || []).map((c) => badge(CLIENTS[c] || c)), p.placeholder ? badge("자리표시", "warn") : null, h("p", {}, "레포 " + p.repo + " · " + p.note)),
+    h("div", { class: "page-head" }, h("h2", {}, p.name), badge(p.form === "isolated" ? "격리형" : p.form === "org" ? "org형" : "user형", "accent"), (p.clients || []).map((c) => badge(CLIENTS[c] || c)), p.placeholder ? badge("자리표시", "warn") : null, h("p", {}, "레포 " + p.repo + " · " + p.note)),
     tabs, isSql || tab === "local" ? null : filterBar(tables, () => state.redraw()), host];
 }
 
@@ -346,10 +346,10 @@ function viewCompare() {
   };
   return [h("div", { class: "page-head" }, h("h2", {}, "제품 × 구조 비교"), h("p", {}, "칸 = 테이블 수 (코어 참조: nomad_core를 FK로 가리키는 테이블 수)")),
     h("div", { class: "scroll", role: "region", "aria-label": "제품 구조 비교표", tabindex: "0" }, h("table", {},
-      h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "제품"), VARIANTS.slice(0, 4).map(([, l]) => h("th", { scope: "col", class: "num" }, l)), h("th", { scope: "col", class: "num" }, "로컬 키"))),
+      h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "제품"), VARIANTS.slice(0, 5).map(([, l]) => h("th", { scope: "col", class: "num" }, l)), h("th", { scope: "col", class: "num" }, "로컬 키"))),
       h("tbody", {}, state.data.products.map((p) => h("tr", {},
         h("th", { scope: "row" }, p.name, p.placeholder ? [" ", badge("자리표시", "warn")] : null),
-        VARIANTS.slice(0, 4).map(([k]) => cell(p, k)), h("td", { class: "num" }, String(p.local_storage.length)))))))];
+        VARIANTS.slice(0, 5).map(([k]) => cell(p, k)), h("td", { class: "num" }, String(p.local_storage.length)))))))];
 }
 
 /* ---------- 렌더 ---------- */
