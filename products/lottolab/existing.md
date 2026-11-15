@@ -16,7 +16,7 @@
 | generated_batches · generated_numbers | 이관(추가 전용) | 같은 이름 | 모바일 | batches: user_id → organization_id, numbers는 batch 경유 |
 | saved_tickets | 이관 | nomad_lottolab.saved_tickets | 모바일 | user_id → organization_id, 멱등 키 unique (org, key) |
 | draw_checks | 이관(쓰기 service_role) | nomad_lottolab.draw_checks | 서버 판정 | ticket 경유 |
-| fortune_profiles | 이관 | nomad_lottolab.fortune_profiles | 모바일 `.from("fortune_profiles")` | PK user_id → organization_id (1조직 1행 = 1인 조직) |
+| fortune_profiles | 이관 | nomad_lottolab.fortune_profiles | 모바일 `.from("fortune_profiles")` | user안 PK user_id. org안 PK (organization_id, user_id): 조직 안에서도 본인만 CRUD(owner·admin도 못 봄). 앱 upsert 충돌 키 `organization_id,user_id`, user_id는 기본값 auth.uid() |
 | user_consents | 이관(추가 전용) | nomad_lottolab.user_consents | 모바일 `.from("user_consents")` | organization_id 추가, user_id는 동의한 사람(행위자)으로 유지 |
 | push_devices (문서만) | 신규(app/) | nomad_lottolab.push_devices | 모바일·데스크톱 알림 | user_id 유지(기기는 사람 소속) |
 | subscription_accounts (문서만, P2) | 신규(app/) | nomad_lottolab.subscription_accounts | 스토어 영수증 검증 | user_id 유지. state 값은 Q3 후 확정, 팀 결제는 nomad_core.subscriptions |

@@ -571,7 +571,8 @@ create policy draw_checks_select_own on nomad_lottolab.draw_checks
     select 1 from nomad_lottolab.saved_tickets t where t.id = ticket_id and nomad_core.organization_role(t.organization_id) is not null));
 
 create table nomad_lottolab.fortune_profiles (
-  organization_id uuid      primary key references nomad_core.organizations (id) on delete cascade,
+  organization_id uuid      not null references nomad_core.organizations (id) on delete cascade,
+  user_id       uuid        not null default auth.uid() references auth.users (id) on delete cascade,
   birth_date    text        not null,
   calendar      text        not null,
   is_leap_month boolean     not null default false,
@@ -579,6 +580,7 @@ create table nomad_lottolab.fortune_profiles (
   consented_at  timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
   deleted_at    timestamptz,
+  constraint fortune_profiles_pkey primary key (organization_id, user_id),
   constraint fortune_profiles_calendar_chk check (calendar in ('solar', 'lunar')),
   constraint fortune_profiles_birth_date_chk check (
     case
@@ -598,20 +600,23 @@ create table nomad_lottolab.fortune_profiles (
     birth_hour in ('ja', 'chuk', 'in', 'myo', 'jin', 'sa', 'o', 'mi', 'sin', 'yu', 'sul', 'hae')
   )
 );
-comment on table nomad_lottolab.fortune_profiles is '사주 번호용 생년월일 프로필(개인정보). 1인 1행, 본인만 CRUD, 계정 삭제 시 CASCADE 파기.';
+comment on table nomad_lottolab.fortune_profiles is '사주 번호용 생년월일 프로필(개인정보). 조직 안에서 1인 1행, 본인만 CRUD(같은 조직 owner·admin도 못 봄). 계정 삭제 시 CASCADE 파기, 조직을 떠나면 본인만 보고 지울 수 있음.';
 alter table nomad_lottolab.fortune_profiles enable row level security;
 revoke all on table nomad_lottolab.fortune_profiles from anon, authenticated, public, service_role;
 grant select, delete on table nomad_lottolab.fortune_profiles to authenticated;
 grant insert (organization_id, birth_date, calendar, is_leap_month, birth_hour) on table nomad_lottolab.fortune_profiles to authenticated;
 grant update (organization_id, birth_date, calendar, is_leap_month, birth_hour, deleted_at) on table nomad_lottolab.fortune_profiles to authenticated;
+-- 본인 행만. 쓰기(추가·수정)는 그 조직 멤버일 때만, 읽기·삭제는 본인이면 언제나(조직을 떠난 뒤에도 내 생년월일을 지울 수 있게).
+-- 계정 삭제 시 user_id FK CASCADE로 파기. organization_id 수정 권한은 앱 upsert용이며 with check가 내가 속한 조직만 허용.
 create policy fortune_profiles_select_own on nomad_lottolab.fortune_profiles
-  for select to authenticated using (nomad_core.organization_role(organization_id) is not null);
+  for select to authenticated using (user_id = (select auth.uid()));
 create policy fortune_profiles_insert_own on nomad_lottolab.fortune_profiles
-  for insert to authenticated with check (nomad_core.organization_role(organization_id) in ('owner', 'admin', 'editor'));
+  for insert to authenticated with check (user_id = (select auth.uid()) and nomad_core.organization_role(organization_id) is not null);
 create policy fortune_profiles_update_own on nomad_lottolab.fortune_profiles
-  for update to authenticated using (nomad_core.organization_role(organization_id) in ('owner', 'admin', 'editor')) with check (nomad_core.organization_role(organization_id) in ('owner', 'admin', 'editor'));
+  for update to authenticated using (user_id = (select auth.uid()) and nomad_core.organization_role(organization_id) is not null)
+  with check (user_id = (select auth.uid()) and nomad_core.organization_role(organization_id) is not null);
 create policy fortune_profiles_delete_own on nomad_lottolab.fortune_profiles
-  for delete to authenticated using (nomad_core.organization_role(organization_id) in ('owner', 'admin', 'editor'));
+  for delete to authenticated using (user_id = (select auth.uid()));
 
 create trigger fortune_profiles_touch_updated_at
   before update on nomad_lottolab.fortune_profiles

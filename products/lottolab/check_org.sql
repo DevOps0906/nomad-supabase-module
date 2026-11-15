@@ -1,5 +1,5 @@
--- LOTTO-LAB org안 검사(합성 데이터). 실행: bash products/lottolab/run_check.sh user
--- (begin; → 청사진 스키마 drop → 임시 touch_updated_at → user/0001 + app/0001 적용 → 이 파일 → rollback;)
+-- LOTTO-LAB org안 검사(합성 데이터). 실행: bash products/lottolab/run_check.sh org
+-- (begin; → 청사진 스키마 drop → 임시 touch_updated_at → org/0001 + app/0001 적용 → 이 파일 → rollback;)
 
 create function pg_temp.expect_fail(p_sql text, p_label text) returns void language plpgsql as $$
 begin
@@ -70,10 +70,37 @@ begin
   if (select count(*) from nomad_lottolab.generator_profiles) <> 1
      or (select count(*) from nomad_lottolab.saved_tickets) <> 1
      or (select count(*) from nomad_lottolab.generated_numbers) <> 1
-     or (select count(*) from nomad_lottolab.fortune_profiles) <> 1
   then raise exception 'viewer cannot read org data'; end if;
+  -- 운세 프로필은 본인만: 같은 조직 viewer에게도 a1 행은 보이지 않는다
+  if (select count(*) from nomad_lottolab.fortune_profiles) <> 0 then raise exception 'fortune_profiles visible to other member'; end if;
 end;
 $$;
+-- viewer도 자기 운세 프로필은 만들 수 있고, 남의 행으로 위조할 수 없다
+insert into nomad_lottolab.fortune_profiles (organization_id, birth_date, calendar)
+  values ('00000000-0000-4000-8000-0000000000aa', '1985-03-03', 'solar');
+select pg_temp.expect_fail($q$insert into nomad_lottolab.fortune_profiles (organization_id, user_id, birth_date, calendar) values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000000a2', '1985-03-03', 'solar')$q$, 'spoof user_id');
+do $$
+declare n int;
+begin
+  if (select count(*) from nomad_lottolab.fortune_profiles) <> 1 then raise exception 'viewer own fortune row missing'; end if;
+  update nomad_lottolab.fortune_profiles set birth_date = '1985-04-04' where user_id = '00000000-0000-4000-8000-0000000000a1';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'viewer updated other fortune row'; end if;
+  delete from nomad_lottolab.fortune_profiles where user_id = '00000000-0000-4000-8000-0000000000a1';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'viewer deleted other fortune row'; end if;
+end;
+$$;
+-- 조직 owner(a1)도 viewer의 운세 프로필은 못 보고 자기 1행만 본다
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true);
+do $$
+begin
+  if (select count(*) from nomad_lottolab.fortune_profiles) <> 1
+     or (select user_id from nomad_lottolab.fortune_profiles) <> '00000000-0000-4000-8000-0000000000a1'
+  then raise exception 'owner sees other member fortune row'; end if;
+end;
+$$;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a3', true);
 select pg_temp.expect_fail($q$insert into nomad_lottolab.generator_profiles (organization_id, game, name, config) values ('00000000-0000-4000-8000-0000000000aa', 'lotto', 'v', '{}')$q$, 'viewer insert');
 do $$
 declare n int;
@@ -153,3 +180,40 @@ begin
   if not nomad_lottolab.waitlist_confirm(h) then raise exception 'confirm'; end if;
 end;
 $$;
+
+-- 운세 프로필 추가 검사: 다른 조직 위조, 앱 upsert, user_id·조직 이동 거부, 조직 탈퇴 후 본인 삭제
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true);
+select pg_temp.expect_fail($q$insert into nomad_lottolab.fortune_profiles (organization_id, birth_date, calendar) values ('00000000-0000-4000-8000-0000000000aa', '1980-01-01', 'solar')$q$, 'B fortune into A org');
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true);
+insert into nomad_lottolab.fortune_profiles (organization_id, birth_date, calendar)
+  values ('00000000-0000-4000-8000-0000000000aa', '1991-02-02', 'solar')
+  on conflict (organization_id, user_id) do update
+  set organization_id = excluded.organization_id, birth_date = excluded.birth_date, calendar = excluded.calendar;
+do $$
+begin
+  if (select birth_date from nomad_lottolab.fortune_profiles) <> '1991-02-02' then raise exception 'fortune upsert failed'; end if;
+end;
+$$;
+select pg_temp.expect_fail($q$update nomad_lottolab.fortune_profiles set user_id = '00000000-0000-4000-8000-0000000000a3'$q$, 'fortune update user_id');
+select pg_temp.expect_fail($q$update nomad_lottolab.fortune_profiles set organization_id = '00000000-0000-4000-8000-0000000000bb'$q$, 'fortune move to non-member org');
+-- a3가 조직을 떠나도 자기 행은 보이고 지울 수 있다(다시 쓰기는 거부)
+reset role;
+delete from nomad_core.memberships where user_id = '00000000-0000-4000-8000-0000000000a3';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a3', true);
+select pg_temp.expect_fail($q$insert into nomad_lottolab.fortune_profiles (organization_id, birth_date, calendar) values ('00000000-0000-4000-8000-0000000000bb', '1980-01-01', 'solar')$q$, 'non-member fortune insert');
+do $$
+declare n int;
+begin
+  if (select count(*) from nomad_lottolab.fortune_profiles) <> 1 then raise exception 'left member cannot see own fortune row'; end if;
+  update nomad_lottolab.fortune_profiles set birth_date = '1970-01-01';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'left member updated fortune row'; end if;
+  delete from nomad_lottolab.fortune_profiles;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'left member cannot delete own fortune row'; end if;
+end;
+$$;
+reset role;
