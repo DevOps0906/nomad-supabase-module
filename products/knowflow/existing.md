@@ -64,8 +64,24 @@
 - 워커 직접 SQL이 `public.sources`·`public.projects`·`public.usage_events`를 쓰므로 스키마 접두를 `nomad_knowflow.`로, 소유 컬럼을 `organization_id`(org안)로 바꿔야 한다.
 - 웹은 `.from("projects")`·`.from("sources")`·`.rpc(...)`에 `schema: 'nomad_knowflow'`(supabase-js `db.schema`)가 필요하고, Supabase API 노출 스키마에 `nomad_knowflow`를 추가한다(`nomad_knowflow_private`는 노출 금지).
 
+## 기능 잠금 (task-007, 2026-11-16) — 쿼터는 자체 월간 쿼터 유지(core 크레딧 아님)
+| 쓰기 경로 | 기능(`knowflow`) | 잠금 위치 | 잠김 시 |
+|---|---|---|---|
+| 대화 생성(conversations insert) · 질문 생성(messages insert, role='user'만) | knowledge_chat | BEFORE INSERT 트리거 `nomad_knowflow_private.require_chat_feature` | KF403 `feature_locked`(HINT 기능). assistant 답변은 허용, 없는 대화는 판정 없이 FK 23503 |
+| 보고서 생성(reports insert) | space_reports | BEFORE INSERT 트리거 `nomad_knowflow_private.require_reports_feature` | KF403(C 플랜에는 space_reports 없음 → 무료 조직은 항상 잠김) |
+| register_pdf_source · register_youtube_source · retry_source | knowledge_base | RPC 안, 인가(프로젝트·자료 조회) 직후·멱등 키 전 `require_feature` | KF403(존재 노출 없음: 남의 것은 계속 P0002) |
+- org안: `nomad_core.org_has_feature(조직, 'knowflow', 기능)`. user안: 사용자가 owner인 활성 조직(가입 시 개인 조직) 중 하나라도 기능이 열려 있으면 허용(`user_has_feature`와 같은 기준, 서버 경로용으로 사용자 id를 받음).
+- 구독이 끊기면(만료·inactive) C 플랜 기능만 남는다. 잠겨도 읽기(select·get_source_chunks·list_project_jobs)와 삭제는 막지 않는다. 잠김 상태에서는 같은 멱등 키 재요청도 KF403.
+- user안 기준은 owner만: 구독한 팀 조직의 admin·editor에게는 열리지 않는다(검사로 고정). `ends_at` 만료도 inactive와 같이 잠김.
+- 자동 경로: `fail_job` 재시도는 같은 잡을 queued로 되돌릴 뿐 쿼터를 다시 차감하지 않고, `sweep_source_rechecks`·`apply_source_recheck`는 유튜브 메타데이터 재확인(30일 보존 정책 준수용) 잡만 만들고 쿼터를 차감하지 않는다 → 잠금 적용 안 함(잠긴 조직도 정책상 재확인·삭제는 계속돼야 함).
+- 이관 절차(기존 데이터 복사): 대상 DB에서 conversations·messages·reports insert가 이 트리거에 걸리지 않도록 복사 세션에서 `set local session_replication_role = replica;`로 넣고 끝나면 `origin`으로 되돌린다(잠긴 조직의 과거 기록도 그대로 옮긴다). touch 트리거도 함께 꺼지므로 `updated_at`은 원본 값을 유지한다.
+- 멱등 차감 1회·실패 잡 환불은 기존 동작을 검사로 고정(PDF 등록·재시도 재요청 시 source_jobs·video_seconds 1회, fail_job 환불).
+- 앱 영향: 웹·서버는 KF403을 "플랜에서 잠긴 기능"으로 처리(업그레이드 안내, HINT로 기능 구분). 서버가 대화·메시지를 직접 insert할 때도 KF403이 난다(유튜브 등록 전 서버의 "기능 플래그 확인"은 DB가 다시 강제). 워커 변경 없음.
+
 ## 팀장 확인 필요
 1. user안의 한도 기준(플랜 C 행 고정)과 코어의 knowflow 플랜 C 시드 필요.
 2. org안 쓰기 역할(owner·admin·editor)·`create_project` 시그니처 변경(조직 id 인자).
 3. 버킷 이름 변경(`sources`→`knowflow-sources`)과 앱 코드 스키마 지정 수정(레포 수정은 이 작업 범위 밖).
 4. 청사진 `nomad_knowflow`(조직형 spaces·chunks)와 같은 스키마 이름이다 — 둘을 한 DB에 함께 둘 수 없다(검사는 begin 안에서 drop).
+5. (task-007) 코어 시드상 C 플랜에 knowledge_base·knowledge_chat이 있어 구독이 끊겨도 실제로는 잠기지 않는다(C 무료 한도로 계속 사용). "끊기면 잠김"을 원하면 C 플랜 기능 시드 조정 필요(검사는 트랜잭션 안에서 C 기능을 빼고 확인).
+6. (task-007) 질문 쿼터(`monthly_questions`) 차감 경로가 DB에 없다(메시지는 서버 직접 insert, 멱등 키 없음). 질문 차감·멱등 RPC를 둘지 결정 필요. 보고서(monthly_reports) 차감 경로도 같은 상태(잠금은 트리거로 적용됨).

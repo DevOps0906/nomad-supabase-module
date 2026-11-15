@@ -62,6 +62,7 @@ insert into t_ids select 's1', (nomad_knowflow.register_pdf_source((select v fro
 select public.t_eq((select (nomad_knowflow.register_pdf_source((select v from t_ids where k = 'p1'), '문서 O1',
   '01010101-0000-0000-0000-000000000001/' || (select v from t_ids where k = 'p1') || '/33333333-3333-3333-3333-333333333333.pdf',
   null, 'key-1', 'hash-1') ->> 'duplicate')::boolean::int), 1, '멱등 키 재요청 duplicate');
+select public.t_eq((select used_source_jobs from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 1, '같은 멱등 키 재요청 시 차감 1회(PDF)');
 
 select public.t_role('service_role');
 insert into t_job select nomad_knowflow.claim_job(60);
@@ -117,6 +118,85 @@ select public.t_eq((select count(*) from storage.objects where bucket_id = 'know
 select public.t_login('cccccccc-0000-0000-0000-00000000000c');
 select public.t_expect($q$insert into storage.objects (bucket_id, name) values ('knowflow-sources', '01010101-0000-0000-0000-000000000001/x/z.pdf')$q$, '42501');
 select public.t_eq((select count(*) from storage.objects where bucket_id = 'knowflow-sources'), 1, 'viewer C는 조직 1 폴더 읽기');
+reset role;
+
+-- ===== 기능 잠금(task-007): 재시도 멱등 차감 1회 · 구독 끊김 = 쓰기 잠금 · 읽기 유지 =====
+insert into t_ids select 'yt', id from nomad_knowflow.sources
+ where organization_id = '01010101-0000-0000-0000-000000000001' and source_type = 'youtube';
+select public.t_role('service_role');
+delete from t_job;
+insert into t_job select nomad_knowflow.claim_job(60);
+select public.t_eq((select count(*) from nomad_knowflow.fail_job(((select j from t_job) ->> 'id')::uuid, ((select j from t_job) ->> 'attempt_count')::int, 'no_handler', false) f where f = 'failed'), 1, '유튜브 작업 실패(환불)');
+reset role;
+select public.t_eq((select used_source_jobs + used_video_seconds from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 1, '실패 잡 환불(source_jobs 1·video_seconds 0)');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select nomad_knowflow.retry_source((select v from t_ids where k = 'yt'), 'rk-1', 'rh-1');
+select public.t_eq((select (nomad_knowflow.retry_source((select v from t_ids where k = 'yt'), 'rk-1', 'rh-1') ->> 'duplicate')::boolean::int), 1, '재시도 멱등 키 재요청 duplicate');
+select public.t_eq((select used_source_jobs from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 2, '같은 멱등 키 재시도 차감 1회(source_jobs)');
+select public.t_eq((select used_video_seconds from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 500, '같은 멱등 키 재시도 차감 1회(video_seconds)');
+
+-- 보고서 잠금: C 플랜(구독 없음)에는 space_reports가 없다 → 서버 insert 거부
+select public.t_role('service_role');
+select public.t_expect(format($q$insert into nomad_knowflow.reports (project_id, organization_id, title) values (%L, '01010101-0000-0000-0000-000000000001', 'r')$q$, (select v from t_ids where k = 'p1')), 'KF403');
+
+-- 잠금 준비: C 플랜에서 knowflow 기능을 빼고(검사 트랜잭션 안에서만) O1에 B 구독
+reset role;
+delete from nomad_core.plan_features where product_code = 'knowflow' and plan_code = 'C';
+insert into nomad_core.subscriptions (organization_id, product_code, plan_code, status)
+values ('01010101-0000-0000-0000-000000000001', 'knowflow', 'B', 'active');
+insert into storage.objects (bucket_id, name, metadata)
+select 'knowflow-sources', '01010101-0000-0000-0000-000000000001/' || v || '/44444444-4444-4444-4444-444444444444.pdf',
+       '{"size": 1000, "mimetype": "application/pdf"}'::jsonb from t_ids where k = 'p1';
+select public.t_role('service_role');
+with c as (insert into nomad_knowflow.conversations (project_id, organization_id, title)
+  select v, '01010101-0000-0000-0000-000000000001', '대화' from t_ids where k = 'p1' returning id)
+insert into t_ids select 'cv', id from c;
+insert into nomad_knowflow.messages (conversation_id, role, content) select v, 'user', '질문' from t_ids where k = 'cv';
+select public.t_eq((select count(*) from nomad_knowflow.messages), 1, '구독 중 대화·메시지 생성');
+insert into nomad_knowflow.reports (project_id, organization_id, title) select v, '01010101-0000-0000-0000-000000000001', '보고서' from t_ids where k = 'p1';
+select public.t_eq((select count(*) from nomad_knowflow.reports), 1, 'B 구독 중 보고서 생성');
+reset role;
+update nomad_core.subscriptions set status = 'inactive'
+ where organization_id = '01010101-0000-0000-0000-000000000001' and product_code = 'knowflow';
+
+-- 잠김: 대화·등록·재시도 거부
+select public.t_role('service_role');
+select public.t_expect(format($q$insert into nomad_knowflow.conversations (project_id, organization_id) values (%L, '01010101-0000-0000-0000-000000000001')$q$, (select v from t_ids where k = 'p1')), 'KF403');
+select public.t_expect(format($q$insert into nomad_knowflow.messages (conversation_id, role, content) values (%L, 'user', '질문2')$q$, (select v from t_ids where k = 'cv')), 'KF403');
+select public.t_expect(format($q$select nomad_knowflow.register_youtube_source('01010101-0000-0000-0000-000000000001', %L, 'lmnopqrstuv', '영상', '채널', 10, 'ky9', 'hy9')$q$, (select v from t_ids where k = 'p1')), 'KF403');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.register_pdf_source(%L, 't', '01010101-0000-0000-0000-000000000001/%s/44444444-4444-4444-4444-444444444444.pdf', null, 'key-9', 'hash-9')$q$, (select v from t_ids where k = 'p1'), (select v from t_ids where k = 'p1')), 'KF403');
+select public.t_expect(format($q$select nomad_knowflow.retry_source(%L, 'rk-2', 'rh-2')$q$, (select v from t_ids where k = 'yt')), 'KF403');
+-- 잠겨도 읽기는 유지
+select public.t_eq((select count(*) from nomad_knowflow.sources), 1, '잠김: 자료 읽기 유지');
+select public.t_eq((select count(*) from nomad_knowflow.messages), 1, '잠김: 메시지 읽기 유지');
+select public.t_eq((select count(*) from nomad_knowflow.projects), 2, '잠김: 프로젝트 읽기 유지');
+select public.t_eq((select (count(*) > 0)::int from nomad_knowflow.list_project_jobs((select v from t_ids where k = 'p1'))), 1, '잠김: 작업 목록 유지');
+select public.t_login('cccccccc-0000-0000-0000-00000000000c');
+select public.t_eq((select count(*) from nomad_knowflow.conversations), 1, '잠김: viewer 대화 읽기 유지');
+-- 잠김: 보고서 거부 · assistant 답변은 허용 · 없는 대화는 FK(23503)
+select public.t_role('service_role');
+select public.t_expect(format($q$insert into nomad_knowflow.reports (project_id, organization_id, title) values (%L, '01010101-0000-0000-0000-000000000001', 'r2')$q$, (select v from t_ids where k = 'p1')), 'KF403');
+insert into nomad_knowflow.messages (conversation_id, role, content) select v, 'assistant', '답변' from t_ids where k = 'cv';
+select public.t_eq((select count(*) from nomad_knowflow.messages where role = 'assistant'), 1, '잠김: assistant 답변 허용');
+select public.t_expect($q$insert into nomad_knowflow.messages (conversation_id, role, content) values (gen_random_uuid(), 'user', 'x')$q$, '23503');
+-- 잠김에도 남의 프로젝트·자료는 P0002(존재 노출 없음)
+select public.t_expect(format($q$select nomad_knowflow.register_youtube_source('01010101-0000-0000-0000-000000000001', %L, 'lmnopqrstuv', '영상', '채널', 10, 'ky8', 'hy8')$q$, (select v from t_ids where k = 'p2')), 'P0002');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.register_pdf_source(%L, 't', '02020202-0000-0000-0000-000000000002/%s/44444444-4444-4444-4444-444444444444.pdf', null, 'key-8', 'hash-8')$q$, (select v from t_ids where k = 'p2'), (select v from t_ids where k = 'p2')), 'P0002');
+select public.t_expect($q$select nomad_knowflow.retry_source(gen_random_uuid(), 'rk-8', 'rh-8')$q$, 'P0002');
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_expect(format($q$select nomad_knowflow.retry_source(%L, 'rk-7', 'rh-7')$q$, (select v from t_ids where k = 'yt')), 'P0002');
+-- 잠김: 같은 멱등 키 재요청도 KF403
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.register_pdf_source(%L, '문서 O1', '01010101-0000-0000-0000-000000000001/%s/33333333-3333-3333-3333-333333333333.pdf', null, 'key-1', 'hash-1')$q$, (select v from t_ids where k = 'p1'), (select v from t_ids where k = 'p1')), 'KF403');
+select public.t_expect(format($q$select nomad_knowflow.retry_source(%L, 'rk-1', 'rh-1')$q$, (select v from t_ids where k = 'yt')), 'KF403');
+-- ends_at 만료(status active)로도 잠김
+reset role;
+update nomad_core.subscriptions set status = 'active', starts_at = now() - interval '2 days', ends_at = now() - interval '1 day'
+ where organization_id = '01010101-0000-0000-0000-000000000001' and product_code = 'knowflow';
+select public.t_role('service_role');
+select public.t_expect(format($q$insert into nomad_knowflow.conversations (project_id, organization_id) values (%L, '01010101-0000-0000-0000-000000000001')$q$, (select v from t_ids where k = 'p1')), 'KF403');
 reset role;
 
 select 'ORG CHECK PASSED' as result;

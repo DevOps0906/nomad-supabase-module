@@ -339,6 +339,60 @@ create function nomad_knowflow_private.limit_of(p_key text) returns integer
 language sql stable security definer set search_path = ''
 as $$ select limit_value from nomad_core.plan_limits where product_code = 'knowflow' and plan_code = 'C' and limit_key = p_key; $$;
 
+-- 기능 잠금(task-007): 사용자가 owner인 활성 조직(가입 시 만든 개인 조직 포함) 중 하나라도 knowflow 기능이 열려 있어야 쓴다
+-- (nomad_core.user_has_feature와 같은 기준. 서버 경로는 auth.uid()가 없어 사용자 id를 받는다). 없으면 KF403 feature_locked(HINT = 기능).
+-- 쓰기 경로만 부르고 읽기는 막지 않는다. 인가(소유 확인) 뒤에 불러 존재를 노출하지 않는다.
+create function nomad_knowflow_private.require_feature(p_user_id uuid, p_feature text) returns void
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1
+    from nomad_core.memberships m
+    join nomad_core.organizations o on o.id = m.organization_id
+    where m.user_id = p_user_id and m.role = 'owner' and o.active
+      and nomad_core.org_has_feature(m.organization_id, 'knowflow', p_feature)
+  ) then
+    raise exception 'feature_locked' using errcode = 'KF403', hint = p_feature;
+  end if;
+end;
+$$;
+
+-- 대화·질문 생성 잠금(knowledge_chat). 쓰기는 서버(service_role) 직접 insert뿐이라 BEFORE INSERT 트리거로 막는다.
+-- 메시지는 role='user'(질문)만 잠그고 assistant 답변은 허용(잠기기 직전 질문의 답변 저장). 대화가 없으면 판정을 건너뛰고 FK(23503)에 맡긴다.
+create function nomad_knowflow_private.require_chat_feature() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare v_user uuid;
+begin
+  if tg_table_name = 'messages' then
+    if new.role is distinct from 'user' then return new; end if;
+    select c.user_id into v_user from nomad_knowflow.conversations c where c.id = new.conversation_id;
+    if not found then return new; end if;
+  else
+    v_user := new.user_id;
+  end if;
+  perform nomad_knowflow_private.require_feature(v_user, 'knowledge_chat');
+  return new;
+end;
+$$;
+create trigger conversations_require_chat before insert on nomad_knowflow.conversations
+  for each row execute function nomad_knowflow_private.require_chat_feature();
+create trigger messages_require_chat before insert on nomad_knowflow.messages
+  for each row execute function nomad_knowflow_private.require_chat_feature();
+
+-- 보고서 생성 잠금(space_reports). 쓰기는 서버·워커(service_role) 직접 insert뿐
+create function nomad_knowflow_private.require_reports_feature() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform nomad_knowflow_private.require_feature(new.user_id, 'space_reports');
+  return new;
+end;
+$$;
+create trigger reports_require_feature before insert on nomad_knowflow.reports
+  for each row execute function nomad_knowflow_private.require_reports_feature();
+
 -- 월 경계 지연 초기화 + 행 보장
 create function nomad_knowflow_private.ensure_quota(p_user_id uuid) returns void
 language plpgsql security definer set search_path = ''
@@ -723,6 +777,7 @@ begin
   end if;
   perform 1 from nomad_knowflow.projects where id = p_project_id and user_id = v_uid and deleted_at is null for update;
   if not found then raise exception 'project_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(v_uid, 'knowledge_base');
 
   select metadata into v_meta from storage.objects where bucket_id = 'knowflow-sources' and name = p_storage_path;
   if not found then raise exception 'storage_object_missing' using errcode = '22023'; end if;
@@ -772,6 +827,7 @@ begin
   select id into v_project_id from nomad_knowflow.projects
    where id = p_project_id and user_id = p_user_id and deleted_at is null for update;
   if not found then raise exception 'project_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(p_user_id, 'knowledge_base');
 
   insert into nomad_knowflow_private.idempotency_keys (user_id, key, request_hash, resource_type, resource_id)
   values (p_user_id, p_idempotency_key, p_request_hash, 'source', v_source_id)
@@ -917,6 +973,7 @@ begin
    where s.id = p_source_id and s.user_id = v_uid and s.deleted_at is null and p.deleted_at is null
    for update of s;
   if not found then raise exception 'source_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(v_uid, 'knowledge_base');
 
   select * into v_claim from nomad_knowflow_private.claim_idempotency_key(p_idempotency_key, p_request_hash, 'job', v_job_id);
   if not v_claim.is_new then

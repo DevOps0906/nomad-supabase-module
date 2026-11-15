@@ -345,6 +345,53 @@ create function nomad_knowflow_private.can_write(p_org uuid) returns boolean
 language sql stable security definer set search_path = ''
 as $$ select coalesce(nomad_core.organization_role(p_org) in ('owner', 'admin', 'editor'), false); $$;
 
+-- 기능 잠금(task-007): 조직의 knowflow 기능 이용권이 없으면 KF403 feature_locked(HINT = 기능). 쓰기 경로만 부르고 읽기는 막지 않는다.
+-- 인가(프로젝트·자료 조회) 뒤에 불러 존재를 노출하지 않는다. 구독이 끊기면 C 플랜 기능만 남는다(nomad_core.org_has_feature).
+create function nomad_knowflow_private.require_feature(p_org uuid, p_feature text) returns void
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not coalesce(nomad_core.org_has_feature(p_org, 'knowflow', p_feature), false) then
+    raise exception 'feature_locked' using errcode = 'KF403', hint = p_feature;
+  end if;
+end;
+$$;
+
+-- 대화·질문 생성 잠금(knowledge_chat). 쓰기는 서버(service_role) 직접 insert뿐이라 BEFORE INSERT 트리거로 막는다.
+-- 메시지는 role='user'(질문)만 잠그고 assistant 답변은 허용(잠기기 직전 질문의 답변 저장). 대화가 없으면 판정을 건너뛰고 FK(23503)에 맡긴다.
+create function nomad_knowflow_private.require_chat_feature() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare v_org uuid;
+begin
+  if tg_table_name = 'messages' then
+    if new.role is distinct from 'user' then return new; end if;
+    select c.organization_id into v_org from nomad_knowflow.conversations c where c.id = new.conversation_id;
+    if not found then return new; end if;
+  else
+    v_org := new.organization_id;
+  end if;
+  perform nomad_knowflow_private.require_feature(v_org, 'knowledge_chat');
+  return new;
+end;
+$$;
+create trigger conversations_require_chat before insert on nomad_knowflow.conversations
+  for each row execute function nomad_knowflow_private.require_chat_feature();
+create trigger messages_require_chat before insert on nomad_knowflow.messages
+  for each row execute function nomad_knowflow_private.require_chat_feature();
+
+-- 보고서 생성 잠금(space_reports). 쓰기는 서버·워커(service_role) 직접 insert뿐
+create function nomad_knowflow_private.require_reports_feature() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform nomad_knowflow_private.require_feature(new.organization_id, 'space_reports');
+  return new;
+end;
+$$;
+create trigger reports_require_feature before insert on nomad_knowflow.reports
+  for each row execute function nomad_knowflow_private.require_reports_feature();
+
 -- 월 경계 지연 초기화 + 행 보장
 create function nomad_knowflow_private.ensure_quota(p_organization_id uuid) returns void
 language plpgsql security definer set search_path = ''
@@ -724,6 +771,7 @@ begin
   select organization_id into v_org from nomad_knowflow.projects
    where id = p_project_id and deleted_at is null and nomad_knowflow_private.can_write(organization_id) for update;
   if not found then raise exception 'project_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(v_org, 'knowledge_base');
   if p_storage_path is null or p_storage_path !~ ('^' || v_org::text || '/' || p_project_id::text || '/[0-9a-f-]{36}\.pdf$') then
     raise exception 'invalid_storage_path' using errcode = '22023';
   end if;
@@ -776,6 +824,7 @@ begin
   select id into v_project_id from nomad_knowflow.projects
    where id = p_project_id and organization_id = p_organization_id and deleted_at is null for update;
   if not found then raise exception 'project_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(p_organization_id, 'knowledge_base');
 
   insert into nomad_knowflow_private.idempotency_keys (organization_id, key, request_hash, resource_type, resource_id)
   values (p_organization_id, p_idempotency_key, p_request_hash, 'source', v_source_id)
@@ -922,6 +971,7 @@ begin
    where s.id = p_source_id and nomad_knowflow_private.can_write(s.organization_id) and s.deleted_at is null and p.deleted_at is null
    for update of s;
   if not found then raise exception 'source_not_found' using errcode = 'P0002'; end if;
+  perform nomad_knowflow_private.require_feature(v_source.organization_id, 'knowledge_base');
 
   select * into v_claim from nomad_knowflow_private.claim_idempotency_key(v_source.organization_id, p_idempotency_key, p_request_hash, 'job', v_job_id);
   if not v_claim.is_new then

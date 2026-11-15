@@ -8,7 +8,7 @@
 | task-004 | 요금 플랜 · 기능 카탈로그와 기능 잠금 | W1 | task-003 | 높음 | builder | 완료 |
 | task-005 | 보류 status 값 목록 확정 · 컬럼 정리 | W2 | task-004 | 높음 | builder | 완료 |
 | task-006 | 플랜별 수량 한도 구조 (수치는 billing-credits 결정 후) | W2 | task-009 | 높음 | builder | 완료 |
-| task-007 | knowflow 대화·업로드를 기능 이용권에 연결(쿼터 유지, 2026-11-16 결정) | W2 | task-004 | 높음 | builder | 진행 |
+| task-007 | knowflow 대화·업로드를 기능 이용권에 연결(쿼터 유지, 2026-11-16 결정) | W2 | task-004 | 높음 | builder | 완료(쿼터 차감 경로·C 플랜 잠금은 결정 대기) |
 | task-008 | 격리형 hospital 확정 (school은 task-009에서 조직형으로 이식) | W2 | task-004 | 높음 | builder | 완료(products/hospital/isolated, 보존 기간 법무 확인 남음) |
 | task-009 | platform-docs 코어·제품 16개 대응표와 이식 계획 | W2 | task-005 | 보통 | planner | 완료 |
 | task-010 | DB 스키마 대시보드(종류별 분류, 디자인 먼저 → Docker 로컬 서빙, 웨이브마다 갱신) | W2 | — | 낮음 | designer·builder | 진행(신규 6제품·격리형 반영 중) |
