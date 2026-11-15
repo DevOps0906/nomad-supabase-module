@@ -16,7 +16,7 @@
 | task-012 | 최우선 5개 제품 DB 변환(실제 레포 기준, 단일 user안·테넌트 org안) | W2 | task-006 | 높음 | builder | 완료 |
 | task-013 | 번들 빌더(단일·테넌트·모노레포) 와 구조별 검증 | W2 | task-011·012 | 보통 | builder | 완료 |
 | task-014 | 코어 웨이브(C1 크레딧 버킷·C2 jobs·C3 rate limit·C5 AI·C6 affiliate·C7 voice) | W3 | task-011 | 높음 | builder | 완료 |
-| task-015 | platform-docs 제품 이식 P1(erp·school·poll·floria) → P2~P4(코어 웨이브 후) | W3 | task-012 | 높음 | builder | 진행(P1~P4 완료, 전체 검증 남음) |
+| task-015 | platform-docs 제품 이식 P1(erp·school·poll·floria) → P2~P4(코어 웨이브 후) | W3 | task-012 | 높음 | builder | 완료(2026-11-16: db reset 후 core 12/12·제품 28개 PASS, 번들 56개·표본 5/5) |
 
 상태: 대기 / 진행 / 완료 / 보류
 
@@ -28,7 +28,7 @@
 | 2026-11-13 | lottolab org안 | 계정 삭제 시 1인 조직 정리 필요 | 데이터 이전·계정 삭제 작업에서 |
 | 2026-11-13 | 제품 레포 앱 코드 | public → nomad_<slug> 스키마 지정(Accept-Profile·.schema()), 일부 이름 변경, ContentFlow 키워드 upsert → 조회 후 insert/update | 각 레포 적용 작업(existing.md 대응표 기준) |
 | 2026-11-13 | erp request_join | 가입 코드 무차별 시도 제한 없음(core rate_limit_hit은 서버 전용, 오류는 raise라 카운트 롤백) | erp_private rate 함수 + 잘못된 코드 반환형 변경, 앱 응답 확인 후 |
-| 2026-11-14 | 청사진 flora·sceneflow·commerce | supabase/migrations의 청사진(nomad_flora·nomad_sceneflow·nomad_commerce)과 products/ 이식본이 같은 스키마 이름 — 로컬 실습 DB에 청사진 기능 행이 남음 | 운영 반영 전 청사진 제거 마이그레이션(또는 청사진을 blueprints/로 이동) |
+| 2026-11-14 | 청사진 flora·sceneflow·commerce | supabase/migrations의 청사진(nomad_flora·nomad_sceneflow·nomad_commerce)과 products/ 이식본이 같은 스키마 이름 — 로컬 실습 DB에 청사진 기능 행이 남음 | 해결(2026-11-16): 운영 반영은 번들로만 하고 번들은 청사진 제품 파일을 넣지 않는다. supabase/migrations 청사진은 로컬 실습·core 테스트(services_access·feature_gating) 전용으로 유지 |
 
 ## 교훈 (다음 작업에 그대로 적용할 것만, 20줄 이내 유지)
 - 

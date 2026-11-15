@@ -1,27 +1,56 @@
 #!/usr/bin/env bash
 # 번들 빌더: core + 제품 SQL을 새 Supabase 프로젝트에 바로 `supabase db push` 할 수 있는 묶음으로 만든다.
 # 사용: bash scripts/build-bundles.sh   (저장소 루트 어디서든; 결과 bundles/ 는 git 제외·매번 새로 만든다)
-#   bundles/single/<slug>/    제품 1개 · user안(없으면 org안)
-#   bundles/tenant/<slug>/    제품 1개 · org안
-#   bundles/monorepo/         제품 5개 · org안(공유 코어)
+#   bundles/single/<slug>/      제품 1개 · user안(없으면 org안)   — products/ 의 전 제품(hospital 제외)
+#   bundles/tenant/<slug>/      제품 1개 · org안                  — 〃
+#   bundles/monorepo/           우선 5개 제품 · org안(공유 코어)
+#   bundles/isolated/hospital/  격리형 hospital 단독(core 없음 · 별도 프로젝트)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIG="$ROOT/supabase/migrations"
 OUT="$ROOT/bundles"
-SLUGS=(contentflow humscore knowflow lottolab shorts)   # 순서 고정 = 번호 NN(01~05)
+# products/*/ 자동 수집(이름순 = 번호 NN · org/ 가 있는 제품만 · 격리형 hospital 제외)
+SLUGS=()
+for d in "$ROOT"/products/*/; do
+  s="$(basename "$d")"
+  [[ "$s" == hospital || ! -d "$d/org" ]] && continue
+  SLUGS+=("$s")
+done
+MONO=(contentflow humscore knowflow lottolab shorts)   # 모노레포 = 우선 5개
 
-# 제품별 메모(확장·로그인)
-ext_note() {
-  case "$1" in
-    knowflow) echo "pg_trgm (마이그레이션이 extensions 스키마에 자동 생성)";;
-    shorts)   echo "pgmq · pg_cron · pg_net (마이그레이션이 생성 — 대시보드 Database > Extensions 에서 사용 가능한 플랜인지 확인)";;
-    lottolab) echo "pg_cron (있으면 스케줄 등록, 없으면 건너뜀)";;
-    *)        echo "없음";;
-  esac
+# 제품 SQL(user·org·app·isolated) 내용
+product_sql() { cat "$ROOT/products/$1"/{user,org,app,isolated}/0*.sql 2>/dev/null | tr -d '\r'; }
+
+# 확장 메모: SQL 의 create extension 을 grep(생성) + pg_cron 참조만 있으면 선택
+scan_ext() {
+  local sql created opt=""
+  sql="$(product_sql "$1")"
+  created="$(grep -oiE 'create extension if not exists [a-z_0-9]+' <<<"$sql" | awk '{print tolower($6)}' | sort -u | paste -sd' ' - | sed 's/ / · /g')" || true
+  if [[ " $created " != *" pg_cron "* ]] && grep -qiE 'pg_cron|cron\.schedule' <<<"$sql"; then
+    opt="pg_cron 선택(있으면 스케줄 등록 · 없으면 SQL 주석의 스케줄을 워커가 호출)"
+  fi
+  if [[ -n "$created" ]]; then
+    echo "$created (마이그레이션이 생성 — 대시보드 Database > Extensions 에서 사용 가능한 플랜인지 확인)${opt:+; $opt}"
+  else
+    echo "${opt:-없음}"
+  fi
 }
 
-# 워커(별도 DB 역할)가 있는 제품
-has_worker() { case "$1" in knowflow|shorts|humscore) return 0;; *) return 1;; esac; }
+# 워커(service_role 로 큐를 처리하는 별도 프로세스)가 있는 제품: core 작업 큐(jobs)를 쓰거나 전용 워커 롤이 있는 제품,
+# 그리고 자체 큐 표를 외부 워커가 소비하는 제품(humscore·knowflow)
+scan_worker() {
+  case "$1" in humscore|knowflow) return 0;; esac
+  grep -qE 'nomad_core\.(enqueue_job|claim_job|jobs)|worker_role' <<<"$(product_sql "$1")"
+}
+
+# 제품 SQL 은 크므로 한 번만 훑어 둔다
+declare -A EXT WORKER
+for s in "${SLUGS[@]}" hospital; do
+  EXT[$s]="$(scan_ext "$s")"
+  if scan_worker "$s"; then WORKER[$s]=1; else WORKER[$s]=0; fi
+done
+ext_note() { echo "${EXT[$1]}"; }
+has_worker() { [[ "${WORKER[$1]}" == 1 ]]; }
 
 idx_of() { local i=1 s; for s in "${SLUGS[@]}"; do [[ "$s" == "$1" ]] && { printf '%02d' "$i"; return; }; i=$((i+1)); done; }
 
@@ -76,7 +105,11 @@ TOML
   {
     echo "# $title"
     echo
-    echo "NOMAD 공통 코어(계정 확장 포함) + 제품 DB 묶음. 생성물이다 — 고치지 말고 \`bash scripts/build-bundles.sh\`로 다시 만든다."
+    if [[ "${WITH_CORE:-1}" == 1 ]]; then
+      echo "NOMAD 공통 코어(계정 확장 포함) + 제품 DB 묶음. 생성물이다 — 고치지 말고 \`bash scripts/build-bundles.sh\`로 다시 만든다."
+    else
+      echo "격리형 제품 DB 단독 묶음(NOMAD 공통 코어 없음 · 다른 제품과 프로젝트를 공유하지 않는다). 생성물이다 — 고치지 말고 \`bash scripts/build-bundles.sh\`로 다시 만든다."
+    fi
     echo
     echo "## 적용"
     echo "1. 새 Supabase 프로젝트를 만든다(운영 프로젝트와 분리)."
@@ -118,6 +151,13 @@ for slug in "${SLUGS[@]}"; do
 done
 b="$OUT/monorepo"; mkdir -p "$b/supabase/migrations"
 add_core "$b/supabase/migrations"
-for slug in "${SLUGS[@]}"; do add_product "$b/supabase/migrations" "$slug" org; done
-write_meta "$b" "모노레포 — 제품 5개(org안)" "${SLUGS[@]}"
-echo "번들 11개 생성: $OUT"
+for slug in "${MONO[@]}"; do add_product "$b/supabase/migrations" "$slug" org; done
+write_meta "$b" "모노레포 — 제품 ${#MONO[@]}개(org안)" "${MONO[@]}"
+# 격리형 hospital: core 없이 isolated/ 만
+b="$OUT/isolated/hospital"; mkdir -p "$b/supabase/migrations"
+m=0
+for f in "$ROOT/products/hospital/isolated"/0*.sql; do
+  m=$((m+1)); cp "$f" "$b/supabase/migrations/202612010000$(printf '%02d' "$m")_hospital_$(basename "$f")"
+done
+WITH_CORE=0 write_meta "$b" "hospital — 격리형(isolated)" hospital
+echo "번들 $(( ${#SLUGS[@]} * 2 + 2 ))개 생성(single·tenant ${#SLUGS[@]}개씩 · monorepo · isolated/hospital): $OUT"

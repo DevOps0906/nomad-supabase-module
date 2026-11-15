@@ -16,6 +16,18 @@ npx supabase db reset --local
 psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 ```
 
+## 번들(새 프로젝트에 바로 적용)
+`bash scripts/build-bundles.sh`가 `bundles/`(git 제외 생성물)를 만든다. 각 번들의 `README.md`가 적용 순서(`supabase link` → `supabase db push`)·확장·워커 역할을 안내한다.
+
+| 구조 | 경로 | 내용 |
+|---|---|---|
+| 단일 | `bundles/single/<제품>/` | core + `products/` 전 제품(hospital 제외) 각각 · user안(없으면 org안) |
+| 테넌트 | `bundles/tenant/<제품>/` | core + 같은 제품 · org안 |
+| 모노레포 | `bundles/monorepo/` | core + 우선 5개(contentflow·humscore·knowflow·lottolab·shorts) · org안 |
+| 격리형 | `bundles/isolated/hospital/` | hospital 단독 · core 없음(별도 프로젝트) |
+
+검증: `bash tests/bundles.sh`(대표 표본: 모노레포 · single news·astro·baedal · 격리형) · `--all`(전부, 오래 걸림) · 번들 이름 지정 가능.
+
 ## 기존 제품에 적용
 
 1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>]... [--with-accounts] [--with-example]`로 공통 마이그레이션(과 선택한 제품)을 복사합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# 번들 11개 검증: 각 번들을 빈 로컬 Supabase에 적용(supabase start가 migrations를 적용)하고 제품 check_*.sql을 돌린다.
-# 사용: bash tests/bundles.sh [번들이름...]   (이름: single/<slug> · tenant/<slug> · monorepo / 없으면 11개 전부)
+# 번들 검증: 각 번들을 빈 로컬 Supabase에 적용(supabase start가 migrations를 적용)하고 제품 check_*.sql을 돌린다.
+# 사용: bash tests/bundles.sh [--all | 번들이름...]   (이름: single/<slug> · tenant/<slug> · monorepo · isolated/hospital)
+#   인자 없음 = 대표 표본(SAMPLE) · --all = bundles/ 전부(single·tenant 전 제품 + monorepo + isolated/hospital)
 # 이 저장소 스택(581xx)과 분리: 임시 폴더 + project_id nsm-bundle-* + 포트 5920x(5432x → 5920x). 로그: .nomad/logs/bundles-*.log
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SLUGS=(contentflow humscore knowflow lottolab shorts)
+MONO=(contentflow humscore knowflow lottolab shorts)   # build-bundles.sh 의 모노레포 5개와 같게
+# 표본: 모노레포 + 새 제품 single 3개(확장 pg_trgm · user안 · 청사진과 같은 스키마 이름) + 격리형
+SAMPLE=(monorepo single/news single/astro single/baedal isolated/hospital)
 LOGDIR="$ROOT/.nomad/logs"; mkdir -p "$LOGDIR"
 BASE_TMP="$(mktemp -d)"
 SX="studio,imgproxy,mailpit,realtime,edge-runtime,logflare,vector,supavisor,postgres-meta,postgrest,kong"
@@ -18,14 +21,19 @@ cleanup() {
   rm -rf "$BASE_TMP"
 }
 NAMES=("$@")
-if ((${#NAMES[@]}==0)); then
-  for s in "${SLUGS[@]}"; do NAMES+=("single/$s"); done
-  for s in "${SLUGS[@]}"; do NAMES+=("tenant/$s"); done
-  NAMES+=(monorepo)
-fi
 trap cleanup EXIT
 
 bash "$ROOT/scripts/build-bundles.sh" >/dev/null || { echo "build 실패"; exit 1; }
+
+if ((${#NAMES[@]}==0)); then
+  NAMES=("${SAMPLE[@]}")
+elif [[ "${NAMES[0]}" == --all ]]; then
+  NAMES=()
+  for d in "$ROOT"/bundles/single/*/; do NAMES+=("single/$(basename "$d")"); done
+  for d in "$ROOT"/bundles/tenant/*/; do NAMES+=("tenant/$(basename "$d")"); done
+  NAMES+=(monorepo)
+  for d in "$ROOT"/bundles/isolated/*/; do NAMES+=("isolated/$(basename "$d")"); done
+fi
 
 # 검사 SQL 준비: 청사진 스키마 drop · 임시 touch_updated_at 정의를 빼고(core에 있음) 제품별 틀을 맞춘다.
 filter() {
@@ -47,7 +55,10 @@ emit_check() { # <slug> <안>
     lottolab) echo 'begin;'  # 단일 트랜잭션 검사라 core의 now() 대신 clock_timestamp() 판(검사 안에서만, rollback)
               echo 'create or replace function nomad_core.touch_updated_at() returns trigger language plpgsql set search_path = '"''"' as $fn$ begin new.updated_at := clock_timestamp(); return new; end; $fn$;'
               filter "$f"; echo 'rollback;';;
-    *)        filter "$f";;
+    *)        # 자체 begin/rollback 이 없는 검사는 트랜잭션으로 감싼다(run_check.sh 와 같은 조건)
+              grep -q '^begin;' "$f" || echo 'begin;'
+              filter "$f"
+              grep -qE '^rollback;' "$f" || echo 'rollback;';;
   esac
 }
 
@@ -74,7 +85,8 @@ run_bundle() { # <이름> <포트오프셋>
 
   local jobs=()
   case "$name" in
-    monorepo) for s in "${SLUGS[@]}"; do jobs+=("$s:org"); done;;
+    monorepo) for s in "${MONO[@]}"; do jobs+=("$s:org"); done;;
+    isolated/*) jobs+=("${name#isolated/}:isolated");;
     single/*) s="${name#single/}"; m=org; [[ -d "$ROOT/products/$s/user" ]] && m=user; jobs+=("$s:$m");;
     tenant/*) jobs+=("${name#tenant/}:org");;
   esac
