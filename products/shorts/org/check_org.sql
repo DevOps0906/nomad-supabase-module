@@ -161,5 +161,69 @@ begin
   end if;
 end $$;
 
+-- ── 0002 버킷: 비공개 · storage.objects 직접 정책 없음 · 남의 경로 객체 접근 0 ──
+reset role;
+do $$
+begin
+  if (select count(*) from storage.buckets
+      where id in ('shorts-sources', 'shorts-voices', 'shorts-renders', 'shorts-thumbnails') and public = false
+        and file_size_limit is not null and allowed_mime_types is not null) <> 4 then
+    raise exception 'FAIL 버킷 4개 비공개·한도';
+  end if;
+  if exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects'
+             and (coalesce(qual, '') || coalesce(with_check, '')) like '%shorts-%') then
+    raise exception 'FAIL storage.objects 에 shorts 버킷 직접 정책이 있음';
+  end if;
+end $$;
+insert into storage.objects (bucket_id, name) values
+  ('shorts-renders', (select id::text from _org where k = 'org1') || '/a2000000-0000-0000-0000-000000000001/a.mp4'),
+  ('shorts-thumbnails', (select id::text from _org where k = 'org2') || '/b2000000-0000-0000-0000-000000000001/b.jpg');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-0000-0000-00000000000a","role":"authenticated"}', true);
+do $$
+begin
+  if (select count(*) from storage.objects where bucket_id like 'shorts-%' and name like (select id::text from _org where k = 'org2') || '/%') <> 0 then
+    raise exception 'FAIL A 가 B 경로 객체를 읽음';
+  end if;
+  if (select count(*) from storage.objects where bucket_id like 'shorts-%') <> 0 then
+    raise exception 'FAIL authenticated 직접 목록(서버 서명 URL 전용이어야 함)';
+  end if;
+  begin
+    insert into storage.objects (bucket_id, name) values ('shorts-renders', (select id::text from _org where k = 'org2') || '/x/hack.mp4');
+    raise exception 'FAIL A 가 B 경로에 업로드';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"bbbbbbbb-0000-0000-0000-00000000000b","role":"authenticated"}', true);
+do $$
+declare n bigint;
+begin
+  if (select count(*) from storage.objects where bucket_id like 'shorts-%' and name like (select id::text from _org where k = 'org1') || '/%') <> 0 then
+    raise exception 'FAIL B 가 A 경로 객체를 읽음';
+  end if;
+  update storage.objects set name = name || '.x' where bucket_id like 'shorts-%';
+  get diagnostics n = row_count;
+  if n <> 0 then
+    raise exception 'FAIL B 가 객체를 수정';
+  end if;
+end $$;
+reset role;
+set local role anon;
+do $$
+begin
+  if (select count(*) from storage.objects where bucket_id like 'shorts-%') <> 0 then
+    raise exception 'FAIL anon 이 shorts 객체를 읽음';
+  end if;
+end $$;
+reset role;
+do $$
+begin
+  if (select count(*) from storage.objects where bucket_id like 'shorts-%') <> 2 then
+    raise exception 'FAIL 객체가 바뀌었거나 사라짐';
+  end if;
+end $$;
+
 select 'CHECK_ORG_OK' as result;
 rollback;
