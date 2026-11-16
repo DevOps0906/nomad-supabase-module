@@ -4,6 +4,7 @@
 - **확정 수: 테이블 31개**(public 28 + private 3), **함수 166개**(원본 기준: public RPC 래퍼 47 + private 119 · 이식 후 private 117), 트리거 20, 정책 43, 버킷 4, pgmq 큐 3, pg_cron 3, 역할 2.
 - 변환: public → `nomad_shorts`(API 노출), private → `nomad_shorts_private`(비노출). 파일: `user/0001_shorts.sql`·`org/0001_shorts.sql`(+`0002_storage.sql`), 검사 `user/check_user.sql`·`org/check_org.sql`.
 - 이식 결과 테이블: nomad_shorts 28(user_settings 신규 1 포함, user_profiles 제거) + nomad_shorts_private 3 = 31. 함수: 166 − 2(삭제) = 164.
+- 원본 52~59번째(3face90 `legacy-migrations/` 의 20261113150000~20261114110300 8개)는 `{user,org}/0003_queue_extension.sql`로 이식했다(7절, task-023). 위 수는 0001 기준이다.
 
 ## 1. 테이블
 소유 열은 "user안 → org안". 간접은 `projects`(또는 `accounts`·`affiliate_links`·`publications`)를 거쳐 소유가 정해지는 하위 테이블로, 컬럼은 그대로고 RLS 식만 `organization_role(projects.organization_id)`로 바뀐다.
@@ -93,3 +94,22 @@ anon에게 주는 권한은 없다(원본도 공개 읽기 없음). 공용 읽�
 2. user_settings 신설 방식 승인.
 3. org안에서 extension_connections·api_keys·credit_ledger 조직 소유 승인.
 4. 동기화 대상은 user_settings 하나(`local-storage.md`).
+
+## 7. 원본 52~59번째 이식 (task-023, `{user,org}/0003_queue_extension.sql`)
+근거: Shopping-Shorts-Maker 커밋 3face90 `supabase/legacy-migrations/`. 같은 함수를 여러 번 바꾼 것은 최종본 하나로 합쳤다.
+
+| 원본 파일 | 처리 | 새 이름·내용 | org안 차이 |
+|---|---|---|---|
+| 20261113150000_job_backpressure | **교정 이식**(0001에 들어 있었지만 큐 이름과 job type 을 섞어 비교해 상한·미룸·적체가 동작하지 않음) | `job_queue_limit(p_queue)`·`job_user_busy(p_job_id, p_queue)` 다시 만듦(인자 이름 변경이라 drop→create), `queue_health` 큐 기준 집계, `create_job` 큐 기준 상한 | job_user_busy 는 워커 호출이라 `organization_role` 대신 소유 조직으로 비교(0001 org안은 항상 false) |
+| 20261113160000_job_queue_status | 이관 | `nomad_shorts.job_queue_status()`(authenticated) → `nomad_shorts_private.job_queue_status`, `job_queue_slots`·`upload_est_seconds`·`job_eta_basis`, 인덱스 `jobs_succeeded_type_finished_idx`. 슬롯 키는 `shorts_*` 큐 이름 | "본인" → 내가 속한 조직(`organization_role is not null`), 미룸·순번 계산은 조직 단위 |
+| 20261114100000_analyze_thumbnail_context | 이관 | `analyze_sources_context` 에 `thumbnail_path` | 반환 키 `organization_id`(0001과 같음) |
+| 20261114100100_quarantine_sticky | 이관 | `save_source_scores`: 격리는 재분석으로 풀리지 않음 | 없음 |
+| 20261114110000_extension_auth | 이관 | `extension_connections` 열 3개(prev_refresh_token_hash·rotated_at·activated_at, authenticated 열 권한 없음), `nomad_shorts_private.rate_counters`(RLS, 정책 없음), RPC `extension_issue`·`extension_authenticate`·`extension_rotate`·`extension_revoke`·`extension_rate_hit`(service_role), `ext_heartbeat` 가 activated_at 기록 | `p_user_id` → `p_organization_id`, `extension_authenticate` 반환 열 `organization_id` |
+| 20261114110100_extension_reports | 이관 | `jobs.files_reported_at`, 부분 unique `jobs_one_active_collect_download_idx`(+기존 중복 정리 update), 큐 **sources → shorts_sources**(권한은 0001 큐와 같음), RPC `extension_report_complete`·`extension_report_abort`(service_role) | 확장·작업 소유 비교가 organization_id |
+| 20261114110200_extension_sweeper_guards | 이관(최종본에 합침) | `sweep_jobs`: 보고된 collect_download 는 끊김 제외, 미활성 10분 확장 폐기, 1일 지난 속도 창 삭제. `set_source_checks`: 활성 확장 작업 중 EX001. `create_job` 중간본은 110300 으로 대체 | 크레딧 반환 행이 organization_id |
+| 20261114110300_extension_review_fixes | 이관 | `create_job`: 활성 확장 작업 중 collect·collect_download·select_sources EX001, collect_download 도 waiting_extension 으로 시작(0001은 queued 로 넣고 null 큐에 send 하던 차이 해소). `ext_collect_download`: 보고 뒤 기록 EX409. `rate_hit`: 키 접두 `ext:`·`user:`·`ip:` 만 | create_job 은 0001 org안처럼 잔액·대기 수·잠금을 조직(`v_org`)으로, 멱등 키 접두는 사용자 |
+
+- 이식하지 않은 항목: 없음. 원본의 기존 데이터 정리 update 2건(activated_at 채우기, 중복 collect_download superseded)은 새 설치에서는 0건이라 그대로 두었다.
+- 앱 변경: 워커는 큐 `sources` 대신 `shorts_sources` 를 읽는다. org안 서버는 `extension_issue`·`extension_revoke` 에 조직 id 를 넘기고 그 전에 조직 권한을 확인해야 한다.
+- 팀장 확인 필요: (1) org안 `rate_hit` 키 접두에 `org:` 를 추가할지(지금은 원본 그대로 ext·user·ip). (2) 0001 org안 `ext_job_project` 가 확장 소유를 `nomad_core.organization_role(e.organization_id)` 로 검사해 서버(service_role, auth.uid 없음) 호출에서 항상 42501 — `extension_collect_list`·`extension_collect_download` 가 org안에서 동작하지 않는다(이 작업 범위 밖이라 고치지 않음, `e.organization_id = v_uid` 로 교정 필요).
+- 검사: `check_{user,org}.sql` 에 0003 절(상한·미룸·적체, 순번 교차 노출, 토큰 발급·회전·재사용 폐기·교차 폐기, 보고 교차 거부·재전송·재검사 메시지, 활성 collect_download 1개, EX001, 속도 제한) 추가.
