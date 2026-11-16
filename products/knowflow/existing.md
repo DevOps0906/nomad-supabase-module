@@ -104,6 +104,9 @@
 | takedown_video (service_role) | 해당 video_id 모든 자료 비활성 → 청크·장면·요약 삭제 → `nomad_core.write_audit` | 22023(video_id·사유). 반환 `active_jobs`가 0이 아니면 작업 종료 뒤 재실행 |
 - 검사: 요약 소유 격리·authenticated/anon 실행 거부·takedown 뒤 replace_*/save 거부·다른 video_id 자료 유지(check_user·check_org).
 
+## 영상 캡처 (`0004_youtube_captures.sql`, KNOWFLOW-AI task-030)
+- 정리 대기열 시도 상한 10(`nomad_knowflow_private.capture_trash_max_attempts()`): 넘은 경로는 claim에서 빠지고 행은 남는다. 운영자는 service_role로 `list_stalled_capture_object_trash(p_limit)`(경로·attempts·stalled_total)를 보고, 원인 해결 뒤 postgres 세션에서 attempts를 0으로 되돌린다.
+
 ## 팀장 확인 필요
 1. user안의 한도 기준(플랜 C 행 고정)과 코어의 knowflow 플랜 C 시드 필요.
 2. org안 쓰기 역할(owner·admin·editor)·`create_project` 시그니처 변경(조직 id 인자).

@@ -455,6 +455,7 @@ select public.t_expect($q$insert into nomad_knowflow.source_captures (source_id,
 select public.t_expect($q$select nomad_knowflow.claim_capture_object_trash(10)$q$, '42501');
 select public.t_expect($q$select nomad_knowflow.ack_capture_object_trash(array['x'])$q$, '42501');
 select public.t_expect($q$select * from nomad_knowflow_private.capture_object_trash$q$, '42501');
+select public.t_expect($q$select * from nomad_knowflow.list_stalled_capture_object_trash(10)$q$, '42501');
 
 -- ===== 업로드 실패 정리: discard → 정리 대기열 =====
 select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
@@ -504,6 +505,23 @@ select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_t
 select public.t_role('service_role');
 select public.t_eq((select nomad_knowflow.ack_capture_object_trash((select paths from t_claim where k = 'c2'))), 12, '재시도 성공분 ack');
 reset role;
+-- 시도 상한: attempts 10 이상은 배정하지 않고 행은 남긴다(운영자 확인용)
+insert into nomad_knowflow_private.capture_object_trash (storage_path, claimed_at, attempts) values
+  ('stall/a.png', now() - interval '1 hour', 10), ('stall/b.png', now() - interval '1 hour', 12),
+  ('stall/c.png', now() - interval '1 hour', 9), ('stall/d.png', null, 10);
+select public.t_role('service_role');
+insert into t_claim select 'c3', nomad_knowflow.claim_capture_object_trash(1000);
+select public.t_eq((select cardinality(paths) from t_claim where k = 'c3'), 1, '시도 상한(10) 미만 1개만 배정');
+select public.t_eq((select (paths[1] = 'stall/c.png')::int from t_claim where k = 'c3'), 1, '9회 경로는 마지막 시도로 배정');
+select public.t_eq((select count(*) from nomad_knowflow.list_stalled_capture_object_trash(1000)), 4, '상한 걸린 경로 4개(9→10 포함) 조회');
+select public.t_eq((select max(stalled_total) from nomad_knowflow.list_stalled_capture_object_trash(1)), 4, 'limit 1이어도 전체 수 4');
+select public.t_expect($q$select * from nomad_knowflow.list_stalled_capture_object_trash(0)$q$, '22023');
+reset role;
+update nomad_knowflow_private.capture_object_trash set claimed_at = now() - interval '16 minutes';
+select public.t_role('service_role');
+select public.t_eq((select cardinality(nomad_knowflow.claim_capture_object_trash(1000))), 0, '상한 넘은 행은 15분 지나도 미배정');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_trash where storage_path like 'stall/%'), 4, '상한 넘은 행은 대기열에 남음');
 
 
 select 'ORG CHECK PASSED' as result;
