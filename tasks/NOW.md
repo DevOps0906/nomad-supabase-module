@@ -1,9 +1,9 @@
 # NOW — 재진입 스냅샷 (30줄 이내, 매 작업 끝에 덮어쓴다)
 
 - 갱신: 2026-11-16 (밤)
-- 브랜치: chore/status-sync-1116 (미푸시). 커밋: 6cbeb60·21722a4(task-021) · ed2313b·7af1f70(022) · df37bd1·edc6c57(023) · e15a27c·2404f9f(knowflow 0003·0004 유튜브)
+- 브랜치: main(9c09a2c, 푸시 완료). chore/status-sync-1116 병합됨
 - 최우선(사용자 2026-11-16): KNOWFLOW 유튜브 요약·중요 장면 캡처. 029(요약·장면 카드·플레이어)·030(사용자 승인 탭 캡처) 구현·리뷰 반영 완료, 플래그 기본 꺼짐
-- 제품 레포 5개 nomad DB 전환: 각 레포 worktree `D:/WorkSpace/DEV/_wt/<레포>-nomad-db` 브랜치 feat/nomad-db에 로컬 커밋(미푸시·미병합)
+- 제품 레포 5개 nomad DB 전환: 각 레포 worktree `D:/WorkSpace/DEV/_wt/<레포>-nomad-db` 브랜치 feat/nomad-db 푸시·PR(병합 보류): humscore#12 · LOTTO-LAB#4(base dev/fortune-and-w0) · ContentFlow#1 · KNOWFLOW#5(base wip/task-004) · Shorts#1(base feat/015b-extension-web, 이번에 원격 생성)
   - humscore 469ca69 · LOTTO-LAB b30f375 · ContentFlow e807f51 · Shorts ed8598f · KNOWFLOW ff2eb0a (각 최신)
 - 테스트: 이 저장소 knowflow·lottolab·contentflow·shorts·personal·erp·news run_check PASS, tenant_access PASS, install_db PASS(82). KNOWFLOW web 332 통과, worker 24 실패는 Node 24 환경(26 필요)
 - 진행 중: 없음. 유튜브 029·030 구현·리뷰 반영·재설치 완료(KNOWFLOW worktree ff2eb0a), ContentFlow·Shorts 재연결 완료
