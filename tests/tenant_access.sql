@@ -125,4 +125,65 @@ begin
   then raise exception 'plan upgrade or retained tenant data failed'; end if;
 end;
 $$;
+
+-- 앱 읽기 RPC(core 20261122000100): 대기 초대 목록(owner·admin, token 미노출) · 내 조직 플랜 한도(멤버)
+reset role;
+insert into nomad_core.invitations (organization_id, email, role, invited_by, accepted_at) values
+ ('00000000-0000-4000-8000-000000000011', 'pending-a@example.test', 'editor', '00000000-0000-4000-8000-000000000001', null),
+ ('00000000-0000-4000-8000-000000000011', 'done-a@example.test', 'viewer', '00000000-0000-4000-8000-000000000001', now()),
+ ('00000000-0000-4000-8000-000000000012', 'pending-b@example.test', 'viewer', '00000000-0000-4000-8000-000000000002', null),
+ ('00000000-0000-4000-8000-000000000013', 'pending-c@example.test', 'viewer', '00000000-0000-4000-8000-000000000003', null);
+insert into nomad_core.plan_limits (product_code, plan_code, limit_key, limit_value) values
+ ('contentflow_example', 'A', 'zz_check_posts', 10),
+ ('contentflow_example', 'B', 'zz_check_posts', 5);
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001', true);
+do $$
+begin
+  if (select count(*) from public.nomad_organization_invitations('00000000-0000-4000-8000-000000000011')) <> 1
+     or not exists (select 1 from public.nomad_organization_invitations('00000000-0000-4000-8000-000000000011')
+                    where email = 'pending-a@example.test' and invited_by = '00000000-0000-4000-8000-000000000001')
+     or exists (select 1 from information_schema.routines r
+                join information_schema.parameters p on p.specific_name = r.specific_name
+                where r.routine_schema = 'public' and r.routine_name = 'nomad_organization_invitations' and p.parameter_name = 'token')
+     or (select limit_value from public.nomad_plan_limits('00000000-0000-4000-8000-000000000011', 'contentflow_example')
+         where limit_key = 'zz_check_posts' and plan_code = 'A') is distinct from 10
+     or exists (select 1 from public.nomad_plan_limits('00000000-0000-4000-8000-000000000012', 'contentflow_example'))
+  then raise exception 'A invitation list or plan limits failed'; end if;
+  begin
+    perform public.nomad_organization_invitations('00000000-0000-4000-8000-000000000012');
+    raise exception 'cross-tenant invitation list succeeded';
+  exception when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000004', true);
+do $$
+begin
+  -- viewer는 초대 목록 거부, 플랜 한도는 읽는다(C 업체는 위에서 A로 올림)
+  if (select limit_value from public.nomad_plan_limits('00000000-0000-4000-8000-000000000013', 'contentflow_example')
+      where limit_key = 'zz_check_posts') is distinct from 10
+     or exists (select 1 from public.nomad_plan_limits('00000000-0000-4000-8000-000000000011', 'contentflow_example'))
+  then raise exception 'viewer plan limits failed'; end if;
+  begin
+    perform public.nomad_organization_invitations('00000000-0000-4000-8000-000000000013');
+    raise exception 'viewer invitation list succeeded';
+  exception when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+set local role anon;
+do $$
+begin
+  begin
+    perform public.nomad_plan_limits('00000000-0000-4000-8000-000000000011', 'contentflow_example');
+    raise exception 'anon plan limits succeeded';
+  exception when insufficient_privilege then null;
+  end;
+end;
+$$;
+reset role;
 rollback;

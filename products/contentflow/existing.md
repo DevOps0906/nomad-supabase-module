@@ -1,6 +1,6 @@
 # ContentFlow-AI-V2.0 기존 DB → nomad_core 기반 org안 대응표
 
-원본: `ContentFlow-AI-V2.0/supabase/migrations/0001~0019`(public, 전부 읽음) · 앱 코드의 `.from()`/`.rpc()` 전수 grep(apps/web/src). 변환본: `org/0001_contentflow.sql`(스키마 `nomad_contentflow` 노출, `nomad_contentflow_private` 비노출). 조직형 전용이라 user안은 없다.
+원본: `ContentFlow-AI-V2.0/supabase/migrations/0001~0027`(public, 전부 읽음) · 앱 코드의 `.from()`/`.rpc()` 전수 grep(apps/web/src). 변환본: `org/0001_contentflow.sql`(0001~0019) · `org/0002_publish_analytics.sql`(0020~0027)(스키마 `nomad_contentflow` 노출, `nomad_contentflow_private` 비노출). 조직형 전용이라 user안은 없다.
 소유 컬럼 공통 변화: `workspace_id` → `organization_id`(→ `nomad_core.organizations`). 복합 FK `(organization_id, id)` 유지.
 
 ## 테이블
@@ -29,6 +29,11 @@
 | blog_metric_snapshots | 이관 | blog_metric_snapshots | web `/api/blog-metrics` | 동일 |
 | workspace_entitlements | 대체: nomad_core.plan_limits | — | web `/api/blogs/usage` | 키 `included_blogs`·`max_blogs`·`overage_allowed`(0/1), product `contentflow`. 수치 시드 없음. grace_until·grace_active_cap은 삭제(이전 시 운영자 판단) |
 | blog_usage_snapshots | 이관(사용량) | blog_usage_snapshots | web `/api/blogs/usage` | 동일. 트리거만 기록 |
+| (0020·0021) publish_jobs | 이관 | publish_jobs | web 발행 큐·worker | 동일. 사이트당 실행 1개는 조직 안(0021). 쓰기는 큐 RPC만 |
+| (0022) analytics_connections | 이관 | analytics_connections | web 분석 연결 화면 | 동일. 멤버 읽기·owner/admin 쓰기, 상태는 RPC만, 삭제는 disconnect_connection |
+| (0023) analytics_credentials | 이관(클라이언트 권한 없음) | analytics_credentials | 자격 RPC만 | 동일. RLS 켬·정책 없음, service_role에도 grant 안 함 |
+| (0024) analytics_sync_runs | 이관 | analytics_sync_runs | web 동기화 기록 | 동일. RPC만 기록 |
+| (0025) revenue_rows·blog_metric_snapshots 출처 컬럼 | 이관 | coverage·sync_run_id·connection_id + tool `gsc-api`·`ga4-api` | web `/api/revenue`·`/api/blog-metrics` | 동일. 클라이언트는 동기화 행 위조 불가(가드 트리거) |
 | (함수) plan_defaults() | 삭제 | — | — | plan_limits로 대체 |
 
 ## 함수 · 트리거 · RPC
@@ -50,6 +55,13 @@
 | enforce_plan_lock · sync_workspace_entitlements | 삭제 | — | — | 플랜은 core subscriptions가 관리 |
 | cf_norm_key · cf_caller_is_client | 이관 | cf_norm_key · nomad_contentflow_private.caller_is_client | 트리거·생성 컬럼 | — |
 | stamp_* · enforce_*_cap · record_article_transition 등 | 이관 | 같은 이름 | 트리거 | 상한 5000/20000/20000/30000은 상수 유지(plan_limits 아님) |
+| enqueue/claim/finish/cancel_publish_job | 이관 | 같은 이름, nomad_contentflow | web·worker 발행 | 역할은 organization_role. claim의 대상 조직은 활성 조직만(원본은 비활성 개념 없음) |
+| store/read_credential · list_credential_versions · read_grant_credential · read_grant_for_revoke · rotate/delete_credential | 이관(0027 최종형) | 같은 이름 | web 분석 연결 | 인자·반환의 workspace → organization(`p_organization`, `organization_id`) |
+| begin_sync_run · finish_sync_run · replace_synced_range · purge_synced_rows · disconnect/reconnect_connection | 이관 | 같은 이름 | web·worker 동기화 | 동일. 지표 중복 키는 0001 생성 컬럼과 같은 cf_norm_key 사용 |
+| cf_analytics_require_admin · cf_grant_creator_active · cf_normalize_page · cf_revenue_row_key · cf_delete_synced_rows | 이관 | 같은 이름 | RPC·트리거 내부 | — |
+| analytics_member_changed (memberships 트리거) | 이관 | 트리거 `contentflow_analytics_member_changed` on nomad_core.memberships | — | 공통 표에 거는 제품 트리거(아래 확인 필요 4) |
+| (앱 요구) 조직 대기 초대 목록 | 대체:nomad_core | public.nomad_organization_invitations(org) | web `/api/team`(invitations select) | core 20261122000100. owner/admin만, token·초대자 이메일 미반환(invited_by id만), 만료 포함 미수락 전부 |
+| (앱 요구) 내 조직 plan_limits | 대체:nomad_core | public.nomad_plan_limits(org, product) | web `/api/blogs/usage` | core 20261122000100. 멤버만(아니면 빈 결과), 현재 플랜(없으면 C)의 키 전부 |
 
 ## 버킷 · 기타
 - Storage 버킷 없음(config.toml은 주석 예시뿐) → `0002_storage.sql`·`app/*.sql` 없음.
@@ -60,3 +72,5 @@
 1. reviewer 역할이 nomad_core에 없음 → 제품 표 reviewers로 보강함(core에 역할 추가 vs 현행 유지).
 2. (해결) core 20261119000300에 my_invitations·decline_invitation·change_member_role·remove_member 추가.
 3. plan_limits 키 3종과 플랜 A/B/C 수치 매핑은 운영자가 정함.
+4. 분석 연결의 동의자 강등 표시(needs_reauth)를 위해 nomad_core.memberships에 제품 트리거를 건다. 다른 제품엔 선례 없음(실제 차단은 cf_grant_creator_active가 매번 하므로 트리거를 빼도 보안은 유지, 상태 표시만 늦어짐).
+5. 대기 초대 목록은 만료된 미수락 초대도 돌려준다(재초대를 막는 행이라 취소할 수 있게). 만료 제외가 맞으면 조건 한 줄 추가.
