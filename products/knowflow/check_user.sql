@@ -180,9 +180,30 @@ select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'answer_id')
 select public.t_expect(format($q$select nomad_knowflow.save_answer(%L, 'x')$q$, (select v from t_ids where k = 'an')), 'P0002');
 select public.t_expect($q$select nomad_knowflow.save_answer(gen_random_uuid(), 'x')$q$, 'P0002');
 select public.t_eq((select count(*) from nomad_knowflow.messages m where m.reply_to = (select v from t_ids where k = 'q1')), 1, '답변은 질문 참조');
+-- 질문 쿼터 환불(결정 2, service_role): 답변 있는 질문 KF409 · 1회만(이번 달 사용량 -1) · 환불된 질문 답변 저장 KF409
+-- · 지난달 차감분은 표식만 지우고 사용량 그대로 · 이관 행(표식 null)은 환불 안 함 · 사용자 롤 실행 불가
+select public.t_expect(format($q$select nomad_knowflow.refund_question_quota(%L)$q$, (select v from t_ids where k = 'q1')), 'KF409');
+select public.t_expect(format($q$select nomad_knowflow.refund_question_quota(%L)$q$, (select v from t_ids where k = 'an')), 'P0002');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q5')) ->> 'refunded')::boolean::int), 1, '질문 환불 성공');
+select public.t_eq((select used_questions from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 4, '질문 환불은 이번 달 사용량 -1');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q5')) ->> 'refunded')::boolean::int), 0, '재환불은 false(1회만)');
+select public.t_eq((select used_questions from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 4, '재환불은 사용량 변화 없음');
+select public.t_expect(format($q$select nomad_knowflow.save_answer(%L, 'x')$q$, (select v from t_ids where k = 'q5')), 'KF409');
+reset role;
+update nomad_knowflow.messages set quota_charged_period = (nomad_knowflow_private.current_period_start() - interval '1 month')::date where id = (select v from t_ids where k = 'q4');
+update nomad_knowflow.messages set quota_charged_period = null where id = (select v from t_ids where k = 'q3');
+select public.t_role('service_role');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q4')) ->> 'refunded')::boolean::int), 1, '지난달 차감분 환불은 표식만');
+select public.t_eq((select used_questions from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 4, '지난달 차감분 환불은 사용량 그대로');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q3')) ->> 'refunded')::boolean::int), 0, '이관 행(표식 null)은 환불 안 함');
+select public.t_eq((select count(*) from nomad_knowflow.messages where id = (select v from t_ids where k = 'q3') and quota_refunded_at is null), 1, '이관 행은 환불 표시 없음');
 select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
 select public.t_eq((select ((nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문', 'qk-1') ->> 'answer_id')::uuid
   = (select v from t_ids where k = 'an'))::int), 1, '질문 재요청은 답변 id도 반환');
+-- 환불된 질문을 같은 멱등 키로 다시 불러도 재차감 없이 refunded=true, 사용자는 환불 RPC 실행 불가
+select public.t_eq((select (nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문 5', 'qk-5') ->> 'refunded')::boolean::int), 1, '환불된 질문 재요청은 refunded');
+select public.t_eq((select used_questions from nomad_knowflow.user_quotas where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 4, '환불된 질문 재요청은 차감 없음');
+select public.t_expect(format($q$select nomad_knowflow.refund_question_quota(%L)$q$, (select v from t_ids where k = 'q2')), '42501');
 -- 보고서: 멱등 키 재요청 차감 1회 · 다른 내용 KF409 · 남의 프로젝트 P0002 · 생성 작업 실패 시 환불·failed
 insert into t_ids select 'rp', (nomad_knowflow.create_report((select v from t_ids where k = 'pa'), '보고서', 'rk-r1') ->> 'report_id')::uuid;
 select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'report_id')::uuid = (select v from t_ids where k = 'rp'))::int

@@ -647,4 +647,40 @@ create policy user_consents_insert_own on nomad_lottolab.user_consents
   for insert to authenticated
   with check (user_id = (select auth.uid()) and nomad_core.organization_role(organization_id) is not null);
 
+-- ── 계정 삭제 전 1인 개인 조직 정리(2026-11-16 결정 8, service_role 전용) ──────────
+-- EF account-delete가 auth 사용자 삭제 **전에** 부른다(삭제 뒤에는 멤버십이 사라져 대상을 찾을 수 없다).
+-- 대상 = kind='personal'이고 멤버가 그 사용자 1명뿐인 조직. 조직 자체(결제 원장·다른 제품 데이터)는 남기고 nomad_lottolab 행만 지운다.
+-- generated_numbers는 batches, draw_checks는 saved_tickets 삭제에 따라 CASCADE. 반환: 정리한 조직 수·표별 삭제 행 수
+create function nomad_lottolab.purge_personal_org_data(p_user_id uuid) returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_orgs uuid[];
+  n_tickets int; n_batches int; n_profiles int; n_fortune int; n_consents int;
+begin
+  if p_user_id is null then
+    raise exception 'purge_personal_org_data: user required' using errcode = '22023';
+  end if;
+  select coalesce(array_agg(o.id), '{}') into v_orgs
+    from nomad_core.organizations o
+   where o.kind = 'personal'
+     and exists (select 1 from nomad_core.memberships m where m.organization_id = o.id and m.user_id = p_user_id)
+     and not exists (select 1 from nomad_core.memberships m where m.organization_id = o.id and m.user_id <> p_user_id);
+  delete from nomad_lottolab.saved_tickets where organization_id = any (v_orgs);
+  get diagnostics n_tickets = row_count;
+  delete from nomad_lottolab.generated_batches where organization_id = any (v_orgs);
+  get diagnostics n_batches = row_count;
+  delete from nomad_lottolab.generator_profiles where organization_id = any (v_orgs);
+  get diagnostics n_profiles = row_count;
+  delete from nomad_lottolab.fortune_profiles where organization_id = any (v_orgs);
+  get diagnostics n_fortune = row_count;
+  delete from nomad_lottolab.user_consents where organization_id = any (v_orgs);
+  get diagnostics n_consents = row_count;
+  return jsonb_build_object('organizations', cardinality(v_orgs), 'saved_tickets', n_tickets, 'generated_batches', n_batches,
+                            'generator_profiles', n_profiles, 'fortune_profiles', n_fortune, 'user_consents', n_consents);
+end;
+$$;
+revoke execute on function nomad_lottolab.purge_personal_org_data(uuid) from public, anon, authenticated;
+grant execute on function nomad_lottolab.purge_personal_org_data(uuid) to service_role;
+
 commit;

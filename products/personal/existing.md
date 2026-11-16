@@ -15,12 +15,12 @@
 ## 테이블 (5개, 이름 유지)
 | 원래 이름 | 분류 | 새 이름 | 사용처 | 소유 컬럼 user→org | 기능 |
 |---|---|---|---|---|---|
-| readings | 이관(+updated_at, input_json → input_ciphertext·key_version 암호문) | nomad_personal.readings | 웹(풀이 기록) · 서버(AI 결과, 입력 암·복호화) | user_id → organization_id + created_by. **작성자만 열람**(owner/admin도 못 봄) | divination |
+| readings | 이관(+updated_at, input_json → input_ciphertext·key_version 암호문, **쓰기 서버만**) | nomad_personal.readings | 웹(읽기·삭제) · 서버(풀이 생성·AI 결과·입력 암·복호화) | user_id → organization_id + created_by. **작성자만 열람**(owner/admin도 못 봄) | divination |
 | saved_reports | 이관 | nomad_personal.saved_reports | 웹 · 서버(PDF) | 같음. 복합 FK가 같은 조직·같은 작성자의 풀이만 허용. pdf_path 접두 `<user_id>/personal/` · `<organization_id>/personal/<created_by>/`, org안 pdf_path는 서버만 기록(사용자 권한 없음) | report_save |
 | birth_profiles | 이관(+updated_at, birth_date·birth_time → birth_ciphertext·key_version 암호문, 쓰기 서버만) | nomad_personal.birth_profiles | 웹(읽기·삭제) · 서버(암·복호화·쓰기) | PK user_id → (organization_id, user_id). 본인만 | divination |
 | trips | 이관(+updated_at, 날짜 역전 CHECK) | nomad_personal.trips | 웹(여행 일정) | user_id → organization_id + created_by. **조직 공유**: 멤버 읽기, owner/admin/editor 쓰기 | trip_planner |
 | trip_days | 이관(+소유 컬럼, +updated_at) | nomad_personal.trip_days | 웹 | 원본은 소유 컬럼 없음(부모 조인 정책) → user_id / organization_id + 복합 FK (소유, trip_id). trip_id not null | trip_planner |
-- 사용자 컬럼 권한: 암호문 컬럼(birth_ciphertext·input_ciphertext)은 select·insert·update 모두 없음(birth_profiles는 사용자 쓰기 없음, 읽기·삭제만). id·소유·작성자(기본값 auth.uid())·시각 컬럼은 insert·update 권한 없음, 조직·부모 참조(organization_id·trip_id·reading_id)는 insert만. org안 saved_reports.pdf_path는 권한 없음(서버가 PDF 생성 후 기록).
+- 사용자 컬럼 권한: 암호문 컬럼(birth_ciphertext·input_ciphertext)은 select·insert·update 모두 없음(readings·birth_profiles는 사용자 쓰기 없음, 읽기·삭제만 — 2026-11-16 결정 1). id·소유·작성자(기본값 auth.uid())·시각 컬럼은 insert·update 권한 없음, 조직·부모 참조(organization_id·trip_id·reading_id)는 insert만. org안 saved_reports.pdf_path는 권한 없음(서버가 PDF 생성 후 기록).
 - 동기화 컬럼: updated_at(touch 트리거) + (소유, updated_at) 인덱스 — readings·birth_profiles·trips·trip_days. 소프트 삭제 없음(개인정보는 물리 삭제).
 
 ## 함수
@@ -33,10 +33,15 @@
 
 - 삭제 절차: 웹이 삭제 RPC를 부르고 → 반환된 pdf_path 목록을 서버(service_role)에 넘겨 스토리지 파일을 지운다(DB 행은 이미 삭제됨, 파일 삭제 실패는 서버가 재시도).
 
+## 앱 계약: readings 쓰기는 서버 전용 (2026-11-16 결정 1)
+- user·org 두 안 모두 authenticated의 readings insert·update 정책과 권한이 없다(웹이 쓰면 42501). 웹은 풀이 요청을 서버 API로 보낸다.
+- 서버(service_role)는 RLS를 우회하므로 **쓰기 전에 서버가 직접 검사한다**: user안은 요청자 본인(`user_id = 호출자`) + `nomad_personal.has_access(user_id, 'divination')`와 같은 판정(개인 조직의 이용권), org안은 `nomad_core.has_feature(조직, 'personal', 'divination')` + 호출자가 그 조직의 활성 멤버인지(memberships) 확인한 뒤 `created_by = 호출자`로 쓴다. 검사를 빼면 잠긴 사용자·비멤버의 풀이가 저장된다.
+- 검사: `run_check.sh` user·org — authenticated insert·update 42501, readings insert·update 권한·정책 0.
+
 ## astro(신비로운AI)와 겹치는 부분 (D4: 흡수하지 않고 별도 제품, 서로 참조하지 않음)
 | 영역 | personal | astro | 차이 |
 |---|---|---|---|
-| 사주·타로 풀이 | readings(kind dream·saju·tarot, input_json·result_md) | readings(saju·tarot·combined, 상태 전이·크레딧·작업) | personal은 단순 기록(웹이 직접 씀), astro는 크레딧 과금·작업 큐·PDF 렌더 파이프라인 |
+| 사주·타로 풀이 | readings(kind dream·saju·tarot, input_json·result_md) | readings(saju·tarot·combined, 상태 전이·크레딧·작업) | personal은 단순 기록(서버가 씀, 과금 없음), astro는 크레딧 과금·작업 큐·PDF 렌더 파이프라인 |
 | 생년월일 | birth_profiles(앱 계층 암호문, 사용자당 1행) | subjects(앱 계층 암호문, 본인·가족·지인 여러 명, 제3자 동의) | 같은 방식(task-018). personal은 형식 CHECK 추가 |
 | PDF | saved_reports.pdf_path | reading_renders(테마·렌더 이력·발송) | — |
 | 꿈해몽·여행 | 있음 | 없음 | personal만 |
@@ -60,8 +65,8 @@ core 표 직접 쓰기·트리거 없음(감사는 write_audit) · 참조 조직
 해당 없음: 결과 저장 잡(jobs·mark_job_delivered) — 기존에 작업·크레딧 연결이 없다(확인 3) · 결제 이벤트 · 공개 읽기 RPC · BEFORE 검사 트리거(touch만).
 
 ## 팀장 확인 필요
-1. 평문 저장 → task-018: 입력 암호화, 결과 평문(재수록 금지 계약 — 위 "암호화" 장, 사용자 결정). 남은 확인: 사용자 직접 쓰기는 readings(kind·result_md)만 남았다 — 입력이 서버 경유가 되므로 readings 쓰기도 서버 전용으로 할지(확인 3과 함께).
+1. (처리됨 2026-11-16) 평문 저장 → task-018 입력 암호화·결과 평문. readings 쓰기는 서버 전용으로 확정(위 "앱 계약" 장).
 2. org안 민감 표를 작성자만 열람하게 했다(owner/admin은 열람 불가, erase로 탈퇴자 것만 삭제). 여행은 조직 공유. 범위가 맞는지.
-3. AI 풀이 결과(result_md)를 사용자가 직접 쓴다(청사진 그대로). 서버 작업(nomad_core.jobs)·크레딧 과금으로 바꿀지 — 바꾸면 결과 저장 교훈(실패 잡 거부·mark_job_delivered) 적용 필요.
-4. org안 viewer도 본인 풀이·생년월일은 쓸 수 있다(개인 자료). 여행은 viewer 읽기만.
+3. AI 풀이 결과(result_md)는 이제 서버가 쓴다(결정 1). 서버 작업(nomad_core.jobs)·크레딧 과금으로 바꿀지 — 바꾸면 결과 저장 교훈(실패 잡 거부·mark_job_delivered) 적용 필요.
+4. org안 풀이·생년월일 쓰기는 서버만(역할 무관, 서버가 멤버십 검사). 여행은 viewer 읽기만.
 5. user안 erase_my_data는 감사 기록을 남기지 않는다(본인 요청, 개인 조직이 비활성일 수 있음).

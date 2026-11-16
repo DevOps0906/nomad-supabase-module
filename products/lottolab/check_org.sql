@@ -217,3 +217,52 @@ begin
 end;
 $$;
 reset role;
+
+-- ── 결정 8: 계정 삭제 전 1인 개인 조직 정리(service_role) ──
+-- p1 = a2만 멤버인 개인 조직(정리 대상, 가입 트리거가 만든 a2 개인 조직도 대상 = 2곳) · p2 = a2와 a3가 함께 있는 개인 조직(제외) · bb = a2 단독 팀 조직(kind team, 제외)
+insert into nomad_core.organizations (id, name, kind) values
+  ('00000000-0000-4000-8000-0000000000c7', 'a2 개인', 'personal'), ('00000000-0000-4000-8000-0000000000c8', '공유 개인', 'personal');
+delete from nomad_core.memberships where organization_id in ('00000000-0000-4000-8000-0000000000c7', '00000000-0000-4000-8000-0000000000c8');
+insert into nomad_core.memberships values
+  ('00000000-0000-4000-8000-0000000000c7', '00000000-0000-4000-8000-0000000000a2', 'owner'),
+  ('00000000-0000-4000-8000-0000000000c8', '00000000-0000-4000-8000-0000000000a2', 'owner'),
+  ('00000000-0000-4000-8000-0000000000c8', '00000000-0000-4000-8000-0000000000a3', 'viewer');
+insert into nomad_lottolab.generator_profiles (organization_id, game, name, config) values
+  ('00000000-0000-4000-8000-0000000000c7', 'lotto', 'p1', '{}'), ('00000000-0000-4000-8000-0000000000c8', 'lotto', 'p2', '{}'),
+  ('00000000-0000-4000-8000-0000000000bb', 'lotto', 'team', '{}');
+insert into nomad_lottolab.generated_batches (id, organization_id, game, strategy, engine_version)
+  values ('00000000-0000-4000-8000-0000000000b7', '00000000-0000-4000-8000-0000000000c7', 'lotto', 's', 'v1');
+insert into nomad_lottolab.generated_numbers (id, batch_id, game, line_no, numbers)
+  values ('00000000-0000-4000-8000-0000000000c9', '00000000-0000-4000-8000-0000000000b7', 'lotto', 1, '{"nums":[1,2,3,4,5,6]}');
+insert into nomad_lottolab.saved_tickets (organization_id, game, ticket_data, purchase_status, source_number_id, idempotency_key)
+  values ('00000000-0000-4000-8000-0000000000c7', 'lotto', '{"nums":[1,2,3,4,5,6]}', 'favorite',
+          '00000000-0000-4000-8000-0000000000c9', '00000000-0000-4000-8000-0000000000f7');
+insert into nomad_lottolab.fortune_profiles (organization_id, user_id, birth_date, calendar)
+  values ('00000000-0000-4000-8000-0000000000c7', '00000000-0000-4000-8000-0000000000a2', '1985-05-05', 'solar');
+insert into nomad_lottolab.user_consents (organization_id, user_id, terms_version, privacy_version, adult_confirmed)
+  values ('00000000-0000-4000-8000-0000000000c7', '00000000-0000-4000-8000-0000000000a2', 't1', 'p1', true);
+-- 사용자 롤은 실행 불가
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true);
+select pg_temp.expect_fail($q$select nomad_lottolab.purge_personal_org_data('00000000-0000-4000-8000-0000000000a2')$q$, 'purge by authenticated');
+reset role;
+set local role service_role;
+do $$
+declare r jsonb := nomad_lottolab.purge_personal_org_data('00000000-0000-4000-8000-0000000000a2');
+begin
+  if r <> '{"organizations": 2, "saved_tickets": 1, "generated_batches": 1, "generator_profiles": 1, "fortune_profiles": 1, "user_consents": 1}'::jsonb then
+    raise exception 'purge result %', r;
+  end if;
+end;
+$$;
+reset role;
+do $$
+begin
+  if exists (select 1 from nomad_lottolab.generated_numbers where batch_id = '00000000-0000-4000-8000-0000000000b7') then raise exception 'numbers not cascaded'; end if;
+  if (select count(*) from nomad_lottolab.generator_profiles where organization_id in ('00000000-0000-4000-8000-0000000000c8', '00000000-0000-4000-8000-0000000000bb')) <> 2 then
+    raise exception 'shared personal org or team org was purged';
+  end if;
+  if not exists (select 1 from nomad_core.organizations where id = '00000000-0000-4000-8000-0000000000c7') then raise exception 'organization itself was deleted'; end if;
+  if not exists (select 1 from nomad_core.memberships where organization_id = '00000000-0000-4000-8000-0000000000c7') then raise exception 'membership was deleted'; end if;
+end;
+$$;

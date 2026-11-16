@@ -87,7 +87,14 @@ select zz_check.fails_with($$select nomad_erp.record_sale((select v::uuid from t
 select zz_check.fails_with($$select nomad_erp.record_sale((select v::uuid from t_ids where k = 'p1'), 1, 'short')$$, 'request_id required');
 insert into t_ids select 's1', id::text from nomad_erp.sales where request_id = 'sale-req-0001';
 select zz_check.expect($$select length(nomad_erp.get_join_code('00000000-0000-0000-0000-00000000000a'))$$, 8);
-select zz_check.expect($$select count(*) from nomad_erp.audit_logs$$, 1);
+-- 감사(결정 4): nomad_core.write_audit, action 접두 erp., 읽기는 rpc nomad_audit_log(owner·admin)
+select zz_check.expect($$select count(*) from public.nomad_audit_log('00000000-0000-0000-0000-00000000000a') where action like 'erp.%'$$, 1);
+select zz_check.expect($$select count(*) from public.nomad_audit_log('00000000-0000-0000-0000-00000000000a') where action not like 'erp.%' and action like '%erp%'$$, 0);
+-- 금액은 원(정수, 결정 3): 소수 입력은 22P02(API 문자열 입력), 판매 합계도 bigint
+select zz_check.fails_with($$update nomad_erp.products set price = '1000.5' where sku = 'SKU-1'$$, '22P02');
+select zz_check.expect($$select total_price from nomad_erp.sales where request_id = 'sale-req-0001'$$, 3000);
+select zz_check.expect($$select (nomad_erp.dashboard_metrics('00000000-0000-0000-0000-00000000000a') ->> 'today_sales_total')::bigint$$, 3000);
+select zz_check.expect($$select sum(total) from nomad_erp.sales_trend('00000000-0000-0000-0000-00000000000a', now() - interval '1 day', now() + interval '1 hour')$$, 3000);
 reset role;
 
 -- ==== 3. 재고 담당(a3): 상품·이력 조회·입고 가능, 판매 조회·등록·부서 쓰기 불가 ====
@@ -128,7 +135,7 @@ select zz_check.expect($$select count(*) from nomad_erp.workspaces$$, 1);
 select zz_check.expect($$select count(*) from nomad_erp.products$$, 0);
 select zz_check.expect($$select count(*) from nomad_erp.sales$$, 0);
 select zz_check.expect($$select count(*) from nomad_erp.departments$$, 0);
-select zz_check.expect($$select count(*) from nomad_erp.audit_logs where organization_id = '00000000-0000-0000-0000-00000000000a'$$, 0);
+select zz_check.fails_with($$select * from public.nomad_audit_log('00000000-0000-0000-0000-00000000000a')$$, '42501');
 select zz_check.denied($$insert into nomad_erp.products (organization_id, sku, name) values ('00000000-0000-0000-0000-00000000000a', 'EVIL', 'x')$$);
 select zz_check.denied($$insert into nomad_erp.departments (organization_id, name) values ('00000000-0000-0000-0000-00000000000a', 'EVIL')$$);
 select zz_check.fails_with($$select nomad_erp.record_inventory_move((select v::uuid from t_ids where k = 'p1'), 'IN', 1)$$, 'role not allowed');
@@ -276,3 +283,13 @@ select zz_check.expect($$select count(distinct r::text) from t_join_resp$$, 1);
 select zz_check.expect($$select count(*) from t_join_resp where k = 'locked' and r = '{"ok": false, "code": "P0002"}'::jsonb$$, 1);
 select zz_check.expect($$select count from nomad_core.rate_limit_buckets where key = 'erp:join:00000000-0000-0000-0000-0000000000aa'$$, 1);
 select zz_check.expect($$select count(*) from nomad_erp.join_requests where user_id = '00000000-0000-0000-0000-0000000000aa'$$, 0);
+
+-- ==== 결정 3·4 정적 검사: 금액 bigint · 제품 감사 표 없음 · 연락처 없는 감사 · 조직 삭제 후에도 감사 로그 남음 ====
+select zz_check.expect($$select count(*) from information_schema.columns where table_schema = 'nomad_erp' and column_name in ('price', 'unit_price', 'total_price') and data_type <> 'bigint'$$, 0);
+select zz_check.expect($$select count(*) from information_schema.columns where table_schema = 'nomad_erp' and column_name in ('price', 'unit_price', 'total_price')$$, 3);
+select zz_check.expect($$select count(*) from pg_tables where schemaname = 'nomad_erp' and tablename = 'audit_logs'$$, 0);
+select zz_check.expect($$select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'nomad_erp_private' and p.proname = 'write_audit'$$, 0);
+select zz_check.expect($$select count(*) from nomad_core.audit_log where action like 'erp.%' and (coalesce(before::text, '') ~* 'phone|email' or coalesce(after::text, '') ~* 'phone|email')$$, 0);
+select zz_check.expect($$select (count(*) > 0)::int from nomad_core.audit_log where organization_id = '00000000-0000-0000-0000-00000000000a' and action like 'erp.%'$$, 1);
+-- 조직 삭제 후에도 남는다: core audit_log에는 organizations FK가 없다(삭제 연쇄 없음)
+select zz_check.expect($$select count(*) from pg_constraint where conrelid = 'nomad_core.audit_log'::regclass and contype = 'f'$$, 0);

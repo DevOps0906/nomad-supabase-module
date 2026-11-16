@@ -26,7 +26,7 @@
 --   NW009 댓글 꺼짐(신문사·기사·선거 정책)    NW010 금칙어 포함
 --   NW011 레이트 리밋                         NW012 토큰 무효·만료(뉴스레터)
 --   NW013 정부광고 직판 금지                  NW014 플랜 한도 초과·구독 끊김(기능 없음)
---   NW015 입력 오류
+--   NW015 입력 오류                         NW016 자기 기사 자기 승인 금지(발행인 1인 신문사 예외)
 --   그 밖: 42501 권한, P0002 없음, 22023 상태 전이·불변 컬럼 위반, 23514 CHECK, 23503 교차 조직 참조, 23505 중복
 begin;
 
@@ -39,8 +39,14 @@ alter default privileges in schema nomad_news grant all on tables to service_rol
 alter default privileges in schema nomad_news grant all on sequences to service_role;
 alter default privileges in schema nomad_news revoke execute on functions from public;
 
--- 검색: tsvector('simple') + pg_trgm(원본 결정 D-7). 확장 추가는 팀장 확인 필요(existing.md).
-create extension if not exists pg_trgm with schema extensions;
+-- 검색: tsvector('simple') + pg_trgm(원본 결정 D-7).
+-- pg_trgm은 core 마이그레이션(*_nomad_core_pg_trgm.sql)이 extensions 스키마에 설치한다(2026-11-16 결정 5). 없으면 분명하게 중단
+do $$
+begin
+  if not exists (select 1 from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'pg_trgm' and n.nspname = 'extensions') then
+    raise exception 'pg_trgm 확장이 extensions 스키마에 없다 — core 마이그레이션 *_nomad_core_pg_trgm.sql을 먼저 적용한다' using errcode = '55000';
+  end if;
+end $$;
 
 insert into nomad_core.products (code, name) values ('news', 'Local News Cloud') on conflict (code) do nothing;
 insert into nomad_core.plans (product_code, code, name) values ('news', 'A', 'A'), ('news', 'B', 'B'), ('news', 'C', 'C')
@@ -2856,6 +2862,8 @@ end;
 $$;
 
 -- 데스크 승인·반려. 승인은 사람만 한다(서버·AI 단독 승인 금지, NW006). 반려는 사유 필수.
+-- 자기 기사(작성자 created_by 또는 필자 author_id가 승인자)는 승인 금지(NW016, 2026-11-16 결정 6).
+-- 예외: 승인자가 발행인이고 신문사의 활성 staff가 발행인 1명뿐일 때(승인해 줄 사람이 없다)
 create function nomad_news.review_article(p_article_id uuid, p_decision text, p_note text default null)
 returns nomad_news.articles
 language plpgsql
@@ -2876,6 +2884,11 @@ begin
   if p_decision = 'approve' then
     if auth.uid() is null then
       raise exception 'review_article: approval requires a human editor' using errcode = 'NW006';
+    end if;
+    if not (auth.uid() is distinct from v_a.created_by and auth.uid() is distinct from v_a.author_id)
+       and not (coalesce(nomad_news.staff_role(v_a.organization_id) = 'publisher', false)
+                and (select count(*) from nomad_news.staff s where s.organization_id = v_a.organization_id and s.status = 'active') = 1) then
+      raise exception 'review_article: cannot approve your own article' using errcode = 'NW016';
     end if;
     update nomad_news.articles set status = 'approved', approved_by = auth.uid(), review_note = p_note where id = p_article_id returning * into v_a;
     perform nomad_news.add_revision(v_a, 'approve', p_note, false, true);

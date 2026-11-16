@@ -134,6 +134,7 @@ begin
 end $$;
 
 -- 6.1 민감 표(작성자 본인만): 읽기·추가·수정·삭제 = 본인 + 이용권. 잠긴 뒤·남의 데이터 삭제는 erase_personal_data
+-- readings 쓰기는 서버(service_role) 전용(2026-11-16 결정 1): insert·update 정책·권한 없음
 do $$
 declare r record;
 begin
@@ -142,10 +143,12 @@ begin
   loop
     execute format('create policy %I on nomad_personal.%I for select to authenticated using (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L))',
                    r.t || '_select', r.t, r.c, r.f);
-    execute format('create policy %I on nomad_personal.%I for insert to authenticated with check (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L))',
-                   r.t || '_insert', r.t, r.c, r.f);
-    execute format('create policy %I on nomad_personal.%I for update to authenticated using (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L)) with check (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L))',
-                   r.t || '_update', r.t, r.c, r.f, r.c, r.f);
+    if r.t <> 'readings' then
+      execute format('create policy %I on nomad_personal.%I for insert to authenticated with check (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L))',
+                     r.t || '_insert', r.t, r.c, r.f);
+      execute format('create policy %I on nomad_personal.%I for update to authenticated using (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L)) with check (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L))',
+                     r.t || '_update', r.t, r.c, r.f, r.c, r.f);
+    end if;
     execute format('create policy %I on nomad_personal.%I for delete to authenticated using (%I = (select auth.uid()) and nomad_core.has_feature(organization_id, ''personal'', %L))',
                    r.t || '_delete', r.t, r.c, r.f);
   end loop;
@@ -173,7 +176,6 @@ alter policy trips_insert on nomad_personal.trips
 grant select (id, organization_id, created_by, kind, key_version, result_md, created_at, updated_at) on nomad_personal.readings to authenticated;
 grant select on nomad_personal.saved_reports, nomad_personal.trips, nomad_personal.trip_days to authenticated;
 grant select (organization_id, user_id, key_version, gender, updated_at) on nomad_personal.birth_profiles to authenticated;
-grant insert (organization_id, kind, result_md), update (kind, result_md) on nomad_personal.readings to authenticated;
 -- saved_reports.pdf_path는 서버(PDF 생성)만 기록한다(사용자 권한 없음 — 같은 조직 다른 작성자 경로 지정 차단)
 grant insert (organization_id, reading_id) on nomad_personal.saved_reports to authenticated;
 grant insert (organization_id, title, start_date, end_date), update (title, start_date, end_date) on nomad_personal.trips to authenticated;

@@ -23,6 +23,9 @@
 | task-018 | personal 생년월일·사주 입력 암호문 전환(astro 방식, 풀이 결과는 평문) | W3 | task-015 | 높음 | builder | 완료(readings 쓰기 서버 전용 여부는 결정 대기) |
 | task-019 | erp 구독 끊긴 조직 가입 코드 거부(없는 코드와 같은 P0002 응답) | W3 | task-016 | 보통 | builder | 완료 |
 | task-020 | install-db.sh --product를 청사진 대신 products/<slug> 이식본 설치로(보안 리뷰 전 청사진 배포 차단) | W3 | task-013 | 높음 | builder | 완료 |
+| task-021 | 2026-11-16 결정 8건 반영(personal·knowflow·erp·news·lottolab·pg_trgm·옛 청사진 정리) | W3 | task-020 | 높음 | builder | 진행 |
+| task-022 | contentflow 이식본 보강: 옛 0020~0027(publish_jobs·analytics_*·sync RPC·metric tool 값) + 조직 대기 초대 목록·plan_limits 읽기 public RPC | W3 | task-021 | 높음 | builder | 대기 |
+| task-023 | shorts 이식본 보강: Shopping-Shorts HEAD 3face90의 추가 마이그레이션 8개(job_queue_status·extension_*·썸네일·격리) 반영 | W3 | task-021 | 높음 | builder | 대기 |
 상태: 대기 / 진행 / 완료 / 보류
 
 ## 발견한 문제 (범위 밖 — 나중 작업 후보)

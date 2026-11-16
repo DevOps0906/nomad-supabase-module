@@ -18,6 +18,13 @@ personal(`birth_ciphertext`·`input_ciphertext`)과 astro(`*_ciphertext`)는 앱
 - 버전: 행의 `key_version`으로 어떤 키인지 찾습니다. 키를 바꾼 뒤 옛 키는 재암호화가 끝나고(`key_version < N` 건수 0)도 최소 DB 백업 보존 기간만큼 보존한 뒤 폐기합니다.
 - 복구: DB를 복원한 시점의 `key_version` 목록(`select distinct key_version …`)에 해당하는 키가 모두 있는지 먼저 확인하고, 서버에서 표본 행 복호화로 검증합니다.
 
+## 옛 청사진 정리 전 백업
+
+`scripts/cleanup-legacy-blueprints.sh <대상 DB 주소>`는 대상 DB에 적용된 옛 제품 청사진(`supabase/migrations/*_<slug>.sql`) 스키마와 옛 기능 행(`nomad_core.features`·`plan_features`)을 지웁니다. 되돌리는 방법은 백업 복구뿐입니다.
+1. 실행 전에 대상 DB 백업을 만들고 백업 시각·체크섬·담당자를 기록합니다(위 "보관 대상").
+2. `--dry-run`으로 지울 스키마·표별 행 수·기능 행 수를 먼저 확인합니다(트랜잭션 안에서 실행 후 되돌림). 행이 있는 표가 보이면 그 데이터가 정말 버려도 되는 것인지 확인합니다.
+3. 대화형 터미널에서 확인 문구를 직접 입력해 실행합니다(비대화 환경은 거부). 표 목록이 청사진과 다른 스키마(같은 이름의 이식본일 수 있음)는 건드리지 않습니다.
+
 ## 복구 연습
 
 1. 복원 대상 제품과 DB 백업 시각, Git 커밋, 객체 백업 시각을 기록합니다.

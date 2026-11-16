@@ -135,6 +135,7 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}', true);
 insert into zz_check.vals select 'artB', (nomad_news.save_article('00000000-0000-0000-0000-00000000000b', null, '{"slug":"beta-1","title":"베타 기사","body":[]}')).id::text;
 select nomad_news.submit_article((select v::uuid from zz_check.vals where k = 'artB'));
+-- 발행인 1인 신문사: 자기 기사 승인 예외(결정 6)
 select nomad_news.review_article((select v::uuid from zz_check.vals where k = 'artB'), 'approve');
 select nomad_news.publish_article((select v::uuid from zz_check.vals where k = 'artB'));
 reset role;
@@ -638,9 +639,29 @@ select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000
 insert into zz_check.vals select 'art5', (nomad_news.save_article('00000000-0000-0000-0000-00000000000a', null,
   jsonb_build_object('slug', 'embargo-1', 'title', '엠바고 기사', 'body', '[]'::jsonb, 'embargo_until', now() + interval '1 hour'))).id::text;
 select nomad_news.submit_article((select v::uuid from zz_check.vals where k = 'art5'));
+-- 결정 6: 자기 기사 자기 승인 금지(NW016) — 작성자(created_by)·필자(author_id) 둘 다
+select zz_check.fails_with($$select nomad_news.review_article((select v::uuid from zz_check.vals where k = 'art5'), 'approve')$$, 'NW016');
+insert into zz_check.vals select 'art6', (nomad_news.save_article('00000000-0000-0000-0000-00000000000a', null,
+  '{"slug":"by-editor-1","title":"필자 지정 기사","body":[],"author_id":"00000000-0000-0000-0000-0000000000a5"}')).id::text;
+select nomad_news.submit_article((select v::uuid from zz_check.vals where k = 'art6'));
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a5","role":"authenticated"}', true);
+select zz_check.fails_with($$select nomad_news.review_article((select v::uuid from zz_check.vals where k = 'art6'), 'approve')$$, 'NW016');
 select nomad_news.review_article((select v::uuid from zz_check.vals where k = 'art5'), 'approve');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a7","role":"authenticated"}', true);
 select nomad_news.publish_article((select v::uuid from zz_check.vals where k = 'art5'));
 reset role;
+-- 결정 6 예외: 발행인이 신문사의 유일한 활성 staff면 자기 기사 승인 허용(조직 B 2절 artB). staff가 늘면 NW016
+insert into nomad_news.staff (organization_id, user_id, role, status, byline_name, joined_at)
+values ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000a9', 'reporter', 'active', '기자B', now());
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}', true);
+insert into zz_check.vals select 'artB2', (nomad_news.save_article('00000000-0000-0000-0000-00000000000b', null, '{"slug":"beta-2","title":"베타 기사 2","body":[]}')).id::text;
+select nomad_news.submit_article((select v::uuid from zz_check.vals where k = 'artB2'));
+select zz_check.fails_with($$select nomad_news.review_article((select v::uuid from zz_check.vals where k = 'artB2'), 'approve')$$, 'NW016');
+reset role;
+delete from nomad_news.staff where organization_id = '00000000-0000-0000-0000-00000000000b' and user_id = '00000000-0000-0000-0000-0000000000a9';
 update nomad_core.subscriptions set status = 'inactive' where organization_id = '00000000-0000-0000-0000-00000000000a' and product_code = 'news';
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);

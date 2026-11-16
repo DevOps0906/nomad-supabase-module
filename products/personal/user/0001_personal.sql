@@ -130,6 +130,7 @@ end $$;
 
 -- ---------- 6. RLS·권한 (표 → 기능) ----------
 -- 읽기·추가·수정·삭제 = has_access(user_id, 기능)로 보이는 본인 행. 잠긴 뒤 삭제는 erase_my_data
+-- readings 쓰기는 서버(service_role) 전용(2026-11-16 결정 1): 입력이 서버 암호화를 거치므로 insert·update 정책·권한 없음
 do $$
 declare r record;
 begin
@@ -141,8 +142,10 @@ begin
     execute format('grant all on table nomad_personal.%I to service_role', r.t);
     execute format('grant delete on table nomad_personal.%I to authenticated', r.t);
     execute format('create policy %I on nomad_personal.%I for select to authenticated using (nomad_personal.has_access(user_id, %L))', r.t || '_select', r.t, r.f);
-    execute format('create policy %I on nomad_personal.%I for insert to authenticated with check (nomad_personal.has_access(user_id, %L))', r.t || '_insert', r.t, r.f);
-    execute format('create policy %I on nomad_personal.%I for update to authenticated using (nomad_personal.has_access(user_id, %L)) with check (nomad_personal.has_access(user_id, %L))', r.t || '_update', r.t, r.f, r.f);
+    if r.t <> 'readings' then
+      execute format('create policy %I on nomad_personal.%I for insert to authenticated with check (nomad_personal.has_access(user_id, %L))', r.t || '_insert', r.t, r.f);
+      execute format('create policy %I on nomad_personal.%I for update to authenticated using (nomad_personal.has_access(user_id, %L)) with check (nomad_personal.has_access(user_id, %L))', r.t || '_update', r.t, r.f, r.f);
+    end if;
     execute format('create policy %I on nomad_personal.%I for delete to authenticated using (nomad_personal.has_access(user_id, %L))', r.t || '_delete', r.t, r.f);
   end loop;
 end $$;
@@ -151,7 +154,6 @@ end $$;
 grant select (id, user_id, kind, key_version, result_md, created_at, updated_at) on nomad_personal.readings to authenticated;
 grant select on nomad_personal.saved_reports, nomad_personal.trips, nomad_personal.trip_days to authenticated;
 grant select (user_id, key_version, gender, updated_at) on nomad_personal.birth_profiles to authenticated;
-grant insert (kind, result_md), update (kind, result_md) on nomad_personal.readings to authenticated;
 grant insert (reading_id, pdf_path), update (pdf_path) on nomad_personal.saved_reports to authenticated;
 grant insert (title, start_date, end_date), update (title, start_date, end_date) on nomad_personal.trips to authenticated;
 grant insert (trip_id, day, plan_json, tools), update (day, plan_json, tools) on nomad_personal.trip_days to authenticated;

@@ -23,13 +23,17 @@ product_sql() { cat "$ROOT/products/$1"/{user,org,app,isolated}/0*.sql 2>/dev/nu
 
 # 확장 메모: SQL 의 create extension 을 grep(생성) + pg_cron 참조만 있으면 선택
 scan_ext() {
-  local sql created opt=""
+  local sql created core_ext opt=""
   sql="$(product_sql "$1")"
   created="$(grep -oiE 'create extension if not exists [a-z_0-9]+' <<<"$sql" | awk '{print tolower($6)}' | sort -u | paste -sd' ' - | sed 's/ / · /g')" || true
+  # core 마이그레이션이 만드는 확장: 이식본은 존재만 검사한다(extname = '<이름>' and nspname = 'extensions', 결정 5)
+  core_ext="$(grep -oE "e\.extname = '[a-z_0-9]+' and n\.nspname = 'extensions'" <<<"$sql" | cut -d"'" -f2 | sort -u | paste -sd' ' - | sed 's/ / · /g')" || true
   if [[ " $created " != *" pg_cron "* ]] && grep -qiE 'pg_cron|cron\.schedule' <<<"$sql"; then
     opt="pg_cron 선택(있으면 스케줄 등록 · 없으면 SQL 주석의 스케줄을 워커가 호출)"
   fi
-  if [[ -n "$created" ]]; then
+  if [[ -n "$core_ext" ]]; then
+    echo "$core_ext (core 마이그레이션 *_nomad_core_${core_ext%% *}.sql 이 생성 — 대시보드 Database > Extensions 에서 사용 가능한 플랜인지 확인)${created:+; $created (마이그레이션이 생성)}${opt:+; $opt}"
+  elif [[ -n "$created" ]]; then
     echo "$created (마이그레이션이 생성 — 대시보드 Database > Extensions 에서 사용 가능한 플랜인지 확인)${opt:+; $opt}"
   else
     echo "${opt:-없음}"
