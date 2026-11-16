@@ -122,7 +122,7 @@ run "$T4" --product contentflow:user
 expect_rc "없는 안(contentflow:user)" 64
 run "$T4" --product knowflow
 expect_rc "다른 제품 추가(knowflow 기본 user안)" 0
-check "knowflow user안 2개" test "$(ls "$M4"/*_knowflow_*.sql | wc -l)" -eq 2
+check "knowflow user안 파일 수 = 이식본" test "$(ls "$M4"/*_knowflow_*.sql | wc -l)" -eq "$(ls "$ROOT"/products/knowflow/user/0*.sql | wc -l)"
 check "knowflow 이식본 내용 = products/knowflow/user" cmp -s "$M4/20261201001501_knowflow_0001_knowflow.sql" "$ROOT/products/knowflow/user/0001_knowflow.sql"
 run "$T4" --product knowflow:org
 expect_rc "같은 제품 다른 안 거부" 64
