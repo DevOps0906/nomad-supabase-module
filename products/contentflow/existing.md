@@ -74,3 +74,8 @@
 3. plan_limits 키 3종과 플랜 A/B/C 수치 매핑은 운영자가 정함.
 4. 분석 연결의 동의자 강등 표시(needs_reauth)를 위해 nomad_core.memberships에 제품 트리거를 건다. 다른 제품엔 선례 없음(실제 차단은 cf_grant_creator_active가 매번 하므로 트리거를 빼도 보안은 유지, 상태 표시만 늦어짐).
 5. 대기 초대 목록은 만료된 미수락 초대도 돌려준다(재초대를 막는 행이라 취소할 수 있게). 만료 제외가 맞으면 조건 한 줄 추가.
+
+## 보안 리뷰 메모 (task-022, 2026-11-16)
+- store_credential: 같은 (조직, google_sub, client_id)가 이미 있으면 암호문은 두고 created_by를 호출자로 바꾼다(원본 0027과 같음). 호출자가 그 Google 계정 토큰을 가졌는지는 확인하지 않는다 — 서버(OAuth 콜백)만 부르도록 앱이 지킨다.
+- finish_publish_job의 p_error(500자)는 viewer 포함 멤버 전원이 읽는다 — 앱은 오류 문구에 토큰·키를 넣지 않는다.
+- analytics_credentials.created_by는 auth.users를 on delete 없이 참조 — 동의자 계정 삭제 전에 연결 해제(disconnect)가 먼저다.
