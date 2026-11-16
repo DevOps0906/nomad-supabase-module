@@ -46,3 +46,13 @@ folders · tags · score_tags · youtube_sources — 구현되면 같은 규칙(
 - `.schema('nomad_humscore')` 지정, API 노출 스키마 설정.
 - org안: 모든 insert에 `organization_id`(개인 사용자는 본인 personal 조직 id, `public.nomad_my_organizations()`) 필요. `user_id`·`owner_id` 필드 제거.
 - 원본 `public` 테이블은 레포 쪽에서 별도 이관(데이터 이전은 이 작업 범위 밖).
+
+## 운영 데이터 이관 (task-032, user안)
+스크립트: 제품 레포 `supabase/nomad-cutover/`(01_freeze·01_freeze_undo·02_copy·check.sh), 절차: 제품 레포 `docs/ops/NOMAD_DB_CUTOVER.md`.
+| 옛 값 | 새 값 | 규칙 |
+|---|---|---|
+| public.scores·setlists·share_links·transcription_jobs | nomad_humscore 같은 이름 | 열 그대로 복사(user_id·owner_id 유지), id·created_at·updated_at·deleted_at 원본 유지 |
+| 플랜 | 없음 | 옛 DB 에 플랜 값이 없다 → subscriptions 행 만들지 않음(구독 없음 = C) |
+| profiles·조직 | 없음 | user안이라 nomad_core 에 쓰는 행 없음 |
+- 제외·중단 규칙: 익명 사용자 소유 행 1건이라도 있으면 건수만 알리고 중단. 대상 표가 비어 있지 않으면 재실행 거부.
+- 복사 중 `session_replication_role = replica`(트랜잭션 한정)로 행 수 제한·touch·콘티 소유 확인·링크 가드 트리거를 끈다 — 삭제된 악보를 가리키는 콘티, 회수된 링크, 서버 updated_at 을 그대로 옮기기 위해. FK 도 꺼지므로 끝에서 고아·링크 소유 일치를 직접 검사한다.

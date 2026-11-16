@@ -38,6 +38,27 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 [Supabase 마이그레이션](https://supabase.com/docs/guides/deployment/database-migrations) · [커스텀 스키마](https://supabase.com/docs/guides/api/using-custom-schemas)
 
+## 기존 제품 데이터 이관
+
+운영 중인 `public.*` 데이터는 마이그레이션 파일이 아니라 대상 저장소 `supabase/nomad-cutover/`의 1회 스크립트로 옮깁니다(스키마만 `db push`, 복사는 사람이 통제). 규칙 정본은 `tasks/task-032-legacy-data-migration.md`, 제품별 대응표는 `products/<slug>/existing.md` "운영 데이터 이관" 절, 실행 순서는 대상 저장소 `docs/ops/NOMAD_DB_CUTOVER.md`입니다.
+- 순서: 백업 → 노출 스키마 추가 → `01_freeze.sql`(옛 표 쓰기 회수·cron·트리거 중지) → 옛 버전 `migration repair --status reverted` → `db push` → `02_copy.sql` dry-run → apply → (Storage 복사) → 새 앱 배포 → 쓰기 재개. 쓰기 재개 뒤에는 되돌릴 수 없습니다.
+- `02_copy.sql`은 대상이 비어 있지 않거나, 익명 사용자 소유 행·대응 없는 옛 플랜·조직 없는 사용자가 있으면 중단합니다. 옛 플랜은 구독 행으로 옮깁니다.
+- 옛 public 표·버킷은 지우지 않습니다. 정리는 전환 확인 뒤 별도 작업입니다.
+
+## 새 프로젝트에 적용 (AI 코딩 도구 지시문)
+
+새 프로젝트를 만들 때는 이 저장소를 받아 두고 아래처럼 지시합니다. AI가 SQL을 골라 복사하거나 새로 짓지 않고 설치 스크립트만 쓰게 하는 것이 핵심입니다.
+
+```
+DB는 nomad-supabase-module 저장소(경로: <로컬 경로>)를 정본으로 쓴다.
+1. 이 프로젝트 루트에서 `npx supabase init` 후, 그 저장소에서
+   `bash scripts/install-db.sh <이 프로젝트 경로> --product <제품키>:<user|org> [--with-accounts]` 로 설치한다.
+   개인 사용자 앱이면 user, 업체·팀이 쓰면 org(+ --with-accounts).
+2. 설치된 supabase/migrations/ 파일은 고치지 않는다. 바꿀 일이 있으면 새 번호 파일로 추가하고 `--check`로 확인한다.
+3. 앱 코드는 products/<제품키>/existing.md 의 앱 계약(RPC 이름·오류 코드·노출 스키마)을 따른다.
+4. products/ 에 맞는 제품이 없으면 SQL을 지어내지 말고 멈춰서 알린다(이식본을 그 저장소에 먼저 추가).
+```
+
 ## 상태 값 사전 점검
 
 `20261117000101`~`107` 파일(contentflow·flora·knowflow·classroom·sceneflow·commerce)은 상태·종류 컬럼 8개에 not null·값 목록 check·기본값을 붙입니다. 허용 값은 각 파일의 check 식이 정본입니다. 기존 행은 바꾸지 않으며, null이나 목록 밖 값이 있으면 파일 맨 앞 점검에서 `테이블.컬럼 … 'done' 1건` 형식의 오류로 중단합니다.

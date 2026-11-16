@@ -107,6 +107,19 @@
 ## 영상 캡처 (`0004_youtube_captures.sql`, KNOWFLOW-AI task-030)
 - 정리 대기열 시도 상한 10(`nomad_knowflow_private.capture_trash_max_attempts()`): 넘은 경로는 claim에서 빠지고 행은 남는다. 운영자는 service_role로 `list_stalled_capture_object_trash(p_limit)`(경로·attempts·stalled_total)를 보고, 원인 해결 뒤 postgres 세션에서 attempts를 0으로 되돌린다.
 
+## 운영 데이터 이관 (task-032, org안)
+스크립트·절차 정본은 KNOWFLOW 레포 `supabase/nomad-cutover/`(01 freeze → 02 copy → 03 storage)·`docs/ops/NOMAD_DB_CUTOVER.md`. 검사 `bash supabase/nomad-cutover/check.sh`(일회용 DB `cutover_knowflow`).
+| 옛 값 (`user_quotas.plan_code`) | 새 값 (`nomad_core.subscriptions`, knowflow) | 비고 |
+|---|---|---|
+| `beta` | 실행 인자 `-v plan_map=beta:<A\|B\|C>` (**결정 대기**) | 개인 조직마다 active 1행, starts_at = 옛 user_quotas.created_at, ends_at null |
+| 그 밖의 값 | 없음 → 02가 `unmapped_plan`으로 중단 | 옛 DB에는 beta 1종만 시드됨 |
+- 소유: 옛 user_id → 개인 조직(`kind = personal`, `created_by` = 사용자, owner 멤버십, 새 migrations 백필이 생성). 정확히 1개가 아니면 `personal_org_missing`으로 중단.
+- 복사 대상: profiles(upsert: 원본 이름·시각으로 덮고 원본 이름이 null이면 백필 값 유지) · user_quotas→org_quotas(사용량) · projects · sources · source_chunks · source_moments · conversations · messages · reports · report_citations · processing_jobs · usage_events(user null → organization null) · idempotency_keys(private) · auth_rate_limits(private). id·created_at·updated_at 원본 유지(`set local session_replication_role = replica`).
+- 새 컬럼 값: conversations·reports.deleted_at null, messages.reply_to·quota_charged_period·quota_refunded_at null, reports.quota_charged_period null(이관 행은 환불 대상 아님). source_summaries·source_captures·capture_object_trash는 옛 데이터 없음.
+- 제외 규칙: 익명 사용자(`auth.users.is_anonymous`) 소유 행이 profiles·user_quotas 포함 하나라도 있으면 표별 건수를 보고하고 중단(버리지 않음). 옛 `plans` 표는 옮기지 않는다(한도는 plan_limits). 옛 표·버킷 `sources`는 지우지 않는다.
+- Storage: PDF 경로 첫 폴더 user_id → organization_id, 버킷 `sources` → `knowflow-sources`. 02가 새 경로를 컬럼에 쓰므로 03 복사·대조(개수·크기)가 앱 배포 전 조건.
+- 동결: 옛 public 표 쓰기 권한 + 쓰기(volatile) 함수 EXECUTE 회수, 옛 가입 트리거 함수 본문 무력화(auth.users 소유자가 아니라 trigger disable 불가). 기록은 `nomad_cutover` 스키마, undo가 정확히 복구.
+
 ## 팀장 확인 필요
 1. user안의 한도 기준(플랜 C 행 고정)과 코어의 knowflow 플랜 C 시드 필요.
 2. org안 쓰기 역할(owner·admin·editor)·`create_project` 시그니처 변경(조직 id 인자).

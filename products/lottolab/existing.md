@@ -54,3 +54,11 @@ generator_profiles · saved_tickets · fortune_profiles: `updated_at not null de
 - 접근: RLS·grant 변경 없음. 본인(`auth.uid() = user_id`)만 SELECT, UPDATE·DELETE 권한 없음, service_role도 접근 없음 → 탈퇴 후 앱에서는 아무도 읽지 못한다(만료 전 기존 JWT는 서명만 검증되므로 만료까지 본인 행을 읽을 수 있음). 열람·파기는 DB 관리자(postgres)만.
 - **보관 기간: 미정(법무 확인 필요)**. 기간이 정해지면 파기 작업(예: 탈퇴 후 N년 지난 행 삭제, pg_cron)을 별도 작업으로 추가한다.
 - 검사: `check_user.sql`·`check_org.sql` 끝부분(계정 삭제·purge 뒤 행 유지, 다른 사용자 못 읽음, 동의 있는 조직 삭제 거부).
+
+## 운영 데이터 이관 (task-032, user안)
+- 스크립트: LOTTO-LAB 레포 `supabase/nomad-cutover/`(01_freeze·01_freeze_undo·02_copy·check.sh), 절차 `docs/ops/NOMAD_DB_CUTOVER.md`. 스토리지 없음 → 03 없음.
+- 대상: 옛 public 12개 표 + `private.rate_limits` → 같은 이름의 `nomad_lottolab`·`nomad_lottolab_private` 표. id·created_at·소유 user_id 원본 유지(user안이라 조직 변환 없음, nomad_core 행을 만들지 않음).
+- 값 규칙: `updated_at` null → generator_profiles는 created_at, fortune_profiles는 consented_at. saved_tickets(옛 updated_at 없음)는 created_at. `deleted_at`은 모두 null. enum은 `game::text`로 새 `game_type`에 대응.
+- 플랜 대응표: 옛 스키마에 플랜·구독 데이터가 없다 → `nomad_core.subscriptions` 행 0건(대응 없는 값 없음). `subscription_accounts`·`push_devices`는 옛 원본이 없는 신규 표(비어 있어야 함, 02가 검사).
+- 동의 이력 보관 결정 유지: `user_consents`는 전부 복사하고 user_id는 FK 없는 값으로 남는다(위 "동의 이력 보관").
+- 제외·중단 규칙: 익명 사용자(auth.users.is_anonymous) 소유 행이 하나라도 있으면 표별 건수를 보고하고 중단(버리지 않음). 대상 표가 비어 있지 않으면 재실행 거부. 옛 pg_cron 3개는 데이터가 아니라 freeze 때 unschedule, 02 apply가 새 표 대상으로 다시 등록.

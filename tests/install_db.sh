@@ -8,8 +8,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 OUT=""; RC=0
-# accounts 제외 core 파일 수(--with-accounts 없을 때 설치되는 수). core가 늘어도 검사가 깨지지 않게 소스에서 센다.
-CORE_N="$(ls "$ROOT"/supabase/migrations/*_nomad_core.sql "$ROOT"/supabase/migrations/*_nomad_core_*.sql | grep -vc '_nomad_core_accounts\.sql$')"
+# core 파일 수(accounts 포함, 항상 설치되는 수). core가 늘어도 검사가 깨지지 않게 소스에서 센다.
+CORE_N="$(ls "$ROOT"/supabase/migrations/*_nomad_core.sql "$ROOT"/supabase/migrations/*_nomad_core_*.sql | wc -l)"
 
 ok()   { PASS=$((PASS+1)); echo "PASS  $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "FAIL  $1"; }
@@ -38,7 +38,7 @@ expect_rc "첫 설치" 0
 M="$T/supabase/migrations"
 check "core 복사됨" test -n "$(ls "$M"/*_nomad_core.sql 2>/dev/null)"
 check "core 한도 파일 복사됨" test -n "$(ls "$M"/*_nomad_core_plan_limits.sql 2>/dev/null)"
-check "accounts 없음" test -z "$(ls "$M"/*_nomad_core_accounts.sql 2>/dev/null)"
+check "accounts 항상 포함" test -n "$(ls "$M"/*_nomad_core_accounts.sql 2>/dev/null)"
 check "example 없음" test -z "$(ls "$M"/*_contentflow_example.sql 2>/dev/null)"
 check "lock 생성" test -f "$T/supabase/nomad.lock"
 check "lock에 core 기록" grep -q '_nomad_core.sql' "$T/supabase/nomad.lock"
@@ -72,12 +72,12 @@ check "복원됨" test -f "$F"
 # 5. 사본 수정 → exit 2, 파일 미변경
 echo "-- local edit" >> "$F"
 H_BEFORE="$(sha256sum "$F" | cut -d' ' -f1)"
-run "$T" --with-accounts
+run "$T" --with-example
 expect_rc "수정된 사본" 2
 check "어긋남 ✗ 표시" has '✗'
 check "'아무 파일도 쓰지 않았습니다.' 출력" has '아무 파일도 쓰지 않았습니다.'
 check "수정 파일 미변경" test "$(sha256sum "$F" | cut -d' ' -f1)" = "$H_BEFORE"
-check "전부 아니면 전무: accounts 미복사" test -z "$(ls "$M"/*_nomad_core_accounts.sql 2>/dev/null)"
+check "전부 아니면 전무: example 미복사" test -z "$(ls "$M"/*_contentflow_example.sql 2>/dev/null)"
 run "$T" --check
 expect_rc "--check 어긋남" 2
 
@@ -202,7 +202,7 @@ echo "select 1;" > "$T8/supabase/migrations/20200101000000_app.sql"
 run "$T8"
 expect_rc "이른 타임스탬프 아닌 경우" 0
 check "순서 경고 없음(대상이 더 오래됨)" bash -c "! printf '%s' \"\$0\" | grep -q include-all" "$OUT"
-check "auth.users 경고 없음(accounts 미선택)" bash -c "! printf '%s' \"\$0\" | grep -q 'auth.users'" "$OUT"
+check "트리거 없는 대상 파일엔 겹침 경고 없음" bash -c "! printf '%s' \"\$0\" | grep -q '_app.sql: auth.users'" "$OUT"
 
 # 12. 원본 불변
 check "원본 저장소 미변경" test "$(src_sum)" = "$SRC_BEFORE"

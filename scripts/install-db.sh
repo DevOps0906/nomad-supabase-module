@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # NOMAD DB 설치기: 공통 코어(supabase/migrations)와 제품 이식본(products/<slug>/)을 다른 Supabase 저장소로 복사한다(DB 접속 없음).
 # 사용법: bash scripts/install-db.sh <대상 저장소> [--product <slug>[:user|org]]... [--with-accounts] [--with-example] [--check]
+#   accounts(가입 트리거·개인 조직)는 core 설치에 항상 포함된다(--with-accounts 는 호환용, 생략해도 같다).
 #   제품 파일은 scripts/build-bundles.sh 의 add_product 와 같은 규칙으로 고르고 이름을 붙인다(번들과 같은 파일 목록).
 #   기본 안: user/ 가 있으면 user, 없으면 org. 격리형(isolated/, 예: hospital)은 core 없이 단독으로만 설치한다.
 #   supabase/migrations 의 옛 제품 청사진(*_<slug>.sql)은 설치하지 않는다(--with-example 의 contentflow_example 만 예외).
@@ -81,6 +82,9 @@ if ((ISOLATED)); then
   for f in "$DST"/*_nomad_core.sql "$DST"/*_nomad_core_*.sql; do
     [[ -e "$f" ]] && die "격리형 제품은 공통 코어가 이미 있는 대상($(basename "$f"))에 설치할 수 없습니다. 별도 프로젝트에 설치하세요."
   done
+else
+  # core credits·jobs·ai·voice 가 accounts 의 credit_ledger 를 쓰므로 core 설치에는 accounts 가 항상 포함된다(--with-accounts 는 호환용).
+  ACCOUNTS=1
 fi
 
 # 제품 번호 NN: build-bundles.sh 와 같은 규칙(products/*/ 이름순 · org/ 가 있는 제품만 · 격리형 제외)

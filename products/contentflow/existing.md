@@ -79,3 +79,24 @@
 - store_credential: 같은 (조직, google_sub, client_id)가 이미 있으면 암호문은 두고 created_by를 호출자로 바꾼다(원본 0027과 같음). 호출자가 그 Google 계정 토큰을 가졌는지는 확인하지 않는다 — 서버(OAuth 콜백)만 부르도록 앱이 지킨다.
 - finish_publish_job의 p_error(500자)는 viewer 포함 멤버 전원이 읽는다 — 앱은 오류 문구에 토큰·키를 넣지 않는다.
 - analytics_credentials.created_by는 auth.users를 on delete 없이 참조 — 동의자 계정 삭제 전에 연결 해제(disconnect)가 먼저다.
+
+## 운영 데이터 이관 (task-032)
+실행 스크립트는 제품 레포 `supabase/nomad-cutover/`(01_freeze · 01_freeze_undo · 02_copy · check.sh), 절차는 `docs/ops/NOMAD_DB_CUTOVER.md`. 02는 기본 dry-run, `-v apply=1`일 때만 commit.
+| 옛 | 새 | 규칙 |
+|---|---|---|
+| workspaces | nomad_core.organizations | id 그대로, kind `team`(1인 workspace도 team), created_by = owner_id, created_at 유지, seat_limit 없음 |
+| memberships | nomad_core.memberships | owner·admin·editor·viewer 그대로. **reviewer → viewer + nomad_contentflow.reviewers 행**(created_at = 옛 멤버십 created_at). 멤버십 created_at은 core에 칸이 없어 버림 |
+| workspaces.plan | nomad_core.subscriptions(contentflow, active) | **free → C, basic → B, pro → A**. 그 밖의 값이 하나라도 있으면 중단. starts_at = 옛 이용권 updated_at(없으면 workspace created_at) |
+| workspace_entitlements | nomad_core.plan_limits(운영자 시드) | 복사하지 않는다. 옛 included_blogs·max_blogs·overage_allowed가 대응 플랜의 plan_limits와 다르거나 시드가 없으면 중단. 유예(grace_until > now) 남은 workspace가 있으면 중단 |
+| invitations | nomad_core.invitations | **대기 초대만**(수락된 초대는 결과가 멤버십에 있어 버림). id·invited_by·created_at 유지, email은 lower(trim), reviewer 초대 → viewer, token 새로 생성, expires_at = 전환 시점 + 7일 |
+| 제품 표 22개(blogs … publish_jobs, rate_limits → nomad_contentflow_private) | nomad_contentflow.* | workspace_id → organization_id 외 같은 컬럼 그대로(id·created_at·updated_at·번호·멱등 키·identity id 유지). 새 컬럼: blogs·keywords updated_at = created_at, deleted_at = null. 시퀀스 setval |
+
+제외·중단 규칙
+- 익명 사용자(auth.users.is_anonymous)를 가리키는 옛 행이 하나라도 있으면 건수만 보고하고 중단(버리지 않음).
+- 개인 조직(db push 백필)이 없는 사용자, owner 멤버십 없는 workspace, 대상 표가 이미 찬 경우(재실행) 중단.
+- 새 표의 check 제약에 걸리는 옛 행이 있으면 중단 — 예: 0012 이전 revenue_rows(timezone·기간 없음, 옛 제약 NOT VALID, 새 제약은 검증됨), 옛 blogs NOT VALID 제약 2개. 처리 방법은 팀장 확인.
+- 복사는 `set local session_replication_role = replica`(대상 트리거·FK 끔)라, 끝에서 표마다 행 수·옮긴 컬럼 전체 값(양방향)과 nomad_core·제품 스키마의 모든 FK(복합 `(organization_id, id)` 포함) 고아 행을 직접 대조한다.
+
+앱 계약
+- 이관 뒤 사용자마다 개인 조직(백필, 빈 조직)과 옛 workspace였던 team 조직이 함께 있다. `nomad_my_organizations()`는 kind 순이라 **개인 조직이 맨 앞**에 온다 → 앱은 목록 첫 항목이 아니라 **마지막 사용 조직**(없으면 첫 team 조직)을 기본 선택한다.
+- 대기 초대는 token이 새로 생겨, 옛 초대 링크(id 방식)는 쓸 수 없다. 받는 사람은 `nomad_my_invitations`(이메일 일치)로 보고 수락한다.
