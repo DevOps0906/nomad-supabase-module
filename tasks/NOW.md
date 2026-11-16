@@ -1,7 +1,7 @@
 # NOW — 재진입 스냅샷 (30줄 이내, 매 작업 끝에 덮어쓴다)
 
 - 갱신: 2026-11-16
-- 브랜치: feat/task-005-status-values (미푸시)
+- 브랜치: main (PR #2 병합 완료, cf4cae8)
 - 현재 작업: 없음 — 대기 작업 0. 작업 표 전부 완료(task-001~020)
 - 마지막으로 한 일: 015 완료·번들 전 제품(aa75c36), 대시보드(e815b22), task-016(15b56fc)·019(997f6af) erp 가입 제한, task-007(9d977b7)·017(3f48625) knowflow 잠금·쿼터 RPC, task-018 personal 암호문(9fbd010), task-020 설치기 products/ 기준(2f2c0bf)
 - 테스트 상태: db reset 후 core tests 12/12, 제품 run_check 28개 PASS(2026-11-15), 이후 변경 제품(erp·knowflow·personal) 재확인 PASS, tests/install_db.sh 82/0, 번들 표본 5/5(번들은 2f2c0bf 시점 재생성)
