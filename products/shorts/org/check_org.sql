@@ -199,10 +199,38 @@ begin
   select extension_id into e from nomad_shorts.extension_issue(o2, repeat('5', 64), repeat('6', 64));
   insert into _ext values ('o2', e);
 
-  -- 보고: 그 확장이 claim 한 running collect_download 만
+  -- 확장 수집 기록(서버 경로, auth.uid 없음): 토큰 조직 = 프로젝트 조직만, 다른 조직 확장은 42501
+  insert into nomad_shorts.jobs (id, project_id, step, type, status, idempotency_key, started_at, extension_id) values
+    ('a3000000-0000-0000-0000-000000000004', 'a2000000-0000-0000-0000-000000000001', nomad_shorts_private.job_step('collect'),
+     'collect', 'running', 'chk-col-a', now(), (select id from _ext where k = 'o1'));
+  begin
+    perform nomad_shorts.extension_collect_list((select id from _ext where k = 'o2'), 'a3000000-0000-0000-0000-000000000004',
+      '[{"url": "https://www.tiktok.com/@chk/video/1", "author": "chk"}]');
+    raise exception 'FAIL 다른 조직 확장의 collect_list 허용됨';
+  exception when insufficient_privilege then null;
+  end;
+  if (nomad_shorts.extension_collect_list((select id from _ext where k = 'o1'), 'a3000000-0000-0000-0000-000000000004',
+        '[{"url": "https://www.tiktok.com/@chk/video/1", "author": "chk"}]') ->> 'inserted')::int <> 1 then
+    raise exception 'FAIL extension_collect_list 기록';
+  end if;
+  update nomad_shorts.sources set checked = true where project_id = 'a2000000-0000-0000-0000-000000000001';
   insert into nomad_shorts.jobs (id, project_id, step, type, status, idempotency_key, started_at, extension_id) values
     ('a3000000-0000-0000-0000-000000000003', 'a2000000-0000-0000-0000-000000000001', nomad_shorts_private.job_step('collect_download'),
      'collect_download', 'running', 'chk-dl-a', now(), (select id from _ext where k = 'o1'));
+  begin
+    perform nomad_shorts.extension_collect_download((select id from _ext where k = 'o2'), 'a3000000-0000-0000-0000-000000000003',
+      jsonb_build_array(jsonb_build_object('id', (select id from nomad_shorts.sources where project_id = 'a2000000-0000-0000-0000-000000000001'),
+                                           'file_path', o1::text || '/a2000000-0000-0000-0000-000000000001/v1.mp4')));
+    raise exception 'FAIL 다른 조직 확장의 collect_download 허용됨';
+  exception when insufficient_privilege then null;
+  end;
+  if nomad_shorts.extension_collect_download((select id from _ext where k = 'o1'), 'a3000000-0000-0000-0000-000000000003',
+       jsonb_build_array(jsonb_build_object('id', (select id from nomad_shorts.sources where project_id = 'a2000000-0000-0000-0000-000000000001'),
+                                            'file_path', o1::text || '/a2000000-0000-0000-0000-000000000001/v1.mp4'))) <> 1 then
+    raise exception 'FAIL extension_collect_download 기록';
+  end if;
+
+  -- 보고: 그 확장이 claim 한 running collect_download 만(위 a3..03)
   begin
     perform nomad_shorts.extension_report_complete((select id from _ext where k = 'o2'), 'a3000000-0000-0000-0000-000000000003');
     raise exception 'FAIL 다른 소유자 확장의 완료 보고 허용됨';

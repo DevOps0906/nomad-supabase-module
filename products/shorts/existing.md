@@ -111,5 +111,5 @@ anon에게 주는 권한은 없다(원본도 공개 읽기 없음). 공용 읽�
 
 - 이식하지 않은 항목: 없음. 원본의 기존 데이터 정리 update 2건(activated_at 채우기, 중복 collect_download superseded)은 새 설치에서는 0건이라 그대로 두었다.
 - 앱 변경: 워커는 큐 `sources` 대신 `shorts_sources` 를 읽는다. org안 서버는 `extension_issue`·`extension_revoke` 에 조직 id 를 넘기고 그 전에 조직 권한을 확인해야 한다.
-- 팀장 확인 필요: (1) org안 `rate_hit` 키 접두에 `org:` 를 추가할지(지금은 원본 그대로 ext·user·ip). (2) 0001 org안 `ext_job_project` 가 확장 소유를 `nomad_core.organization_role(e.organization_id)` 로 검사해 서버(service_role, auth.uid 없음) 호출에서 항상 42501 — `extension_collect_list`·`extension_collect_download` 가 org안에서 동작하지 않는다(이 작업 범위 밖이라 고치지 않음, `e.organization_id = v_uid` 로 교정 필요).
+- 팀장 확인 필요: (1) org안 `rate_hit` 키 접두에 `org:` 를 추가할지(지금은 원본 그대로 ext·user·ip). (2) [해결] 0001 org안 `ext_job_project` 의 확장 소유 검사를 `organization_role(e.organization_id)`(서버 호출에서 항상 42501) → `e.organization_id = v_uid`(프로젝트 조직, 0003 `ext_report_job` 과 같은 비교)로 교정. 미배포 이식본이라 0001 을 직접 고쳤고 `check_org.sql` 에 collect_list·collect_download 정상 기록과 다른 조직 확장 42501 검사를 추가했다.
 - 검사: `check_{user,org}.sql` 에 0003 절(상한·미룸·적체, 순번 교차 노출, 토큰 발급·회전·재사용 폐기·교차 폐기, 보고 교차 거부·재전송·재검사 메시지, 활성 collect_download 1개, EX001, 속도 제한) 추가.
