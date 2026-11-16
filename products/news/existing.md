@@ -90,17 +90,18 @@
 | NW014 | 구독 끊김 잠금(새 발행·편집·초대·새 결제·새 독자 등) 또는 플랜 기능 없음(print_pdf)·인원 한도(news_staff_max) | 구독 갱신 안내(발행인), 독자 화면은 "지금은 이용할 수 없음" |
 | NW011 | rate_limit_take 한도 초과(개설 신청·댓글·신고·업소·경조사·뉴스레터·제보·정정 청구) | 잠시 후 다시 시도 |
 | P0002 | 행 없음 또는 남의 조직 행(W7) | 찾을 수 없음 |
+| NW016 | 자기 기사 승인(review_article approve의 승인자 = 작성자 created_by 또는 필자 author_id, 2026-11-16 결정 6). 예외: 발행인이 신문사의 유일한 활성 staff | "다른 데스크·편집인에게 승인을 요청하세요" — 승인 버튼은 작성자·필자에게 숨긴다 |
 
 ## 팀장 확인 필요
 1. 플랜 대응: A = 원본 pro(+enterprise), B = starter·standard(체험 포함), C = 구독 없음(기능 없음). core 가 "구독 없음 = C"라 news 의 C 는 유료 플랜이 될 수 없다. starter 와 standard 를 한도로 나누려면 B 를 둘로 나눠야 함.
-2. `create extension if not exists pg_trgm with schema extensions`(원본 결정 D-7, 제목 부분 일치 GIN) — 로컬 DB 에 없던 확장. core 마이그레이션으로 옮길지, 이식본에 둘지.
+2. (처리됨 2026-11-16 결정 5) pg_trgm 은 core 마이그레이션 `*_nomad_core_pg_trgm.sql`(extensions 스키마)이 만든다. 이식본은 만들지 않고 extensions 스키마에 있는지만 검사(없으면 55000 으로 중단).
 3. N1 열어 둔 경로 목록(위 장)과 서버 예약 게시 실패 시 approved 되돌림, 기존 승인 광고(serve_ads)는 끊김 뒤에도 노출되는 점.
 4. 초대·타인 제거는 발행인(core owner)만 가능 — core create_invitation·remove_member 가 owner·admin 만 허용하고 N3 가 admin 을 주지 않으므로 원본의 "편집인도 초대·제거"는 사라졌다. 발행인 이전(소유권 이전) 절차 미정.
 5. `memberships.billing_credential_id` 는 신문사 toss_merchant 키를 가리키게 했다(독자 빌링키 저장 위치는 원본에서도 불명확 — 결제 서버 설계 때 확인).
 6. 버킷: 위 "버킷" 장(원본 Storage 제한 정책 미이식, 버킷 이름 미확정).
 7. `get_public_newspaper.reader_signup_open`(= 플랜 활성 여부)이 공개 응답에 들어간다 — 가입 버튼 표시용. 노출이 싫으면 빼고 가입 실패(NW014)로만 처리.
 8. 원본 표 수는 머리 주석 기준 40개로 대조(37 + 이력·연결 3). 청사진 `supabase/migrations` 에는 nomad_news 가 없어 중복 등록 문제 없음.
-9. 데스크 자기 기사 자기 승인: 원본 정책 유지(review_article 이 작성자와 승인자를 구분하지 않는다). 막으려면 approved_by <> created_by 검사 1줄.
+9. (처리됨 2026-11-16 결정 6) 자기 기사 자기 승인 금지: review_article approve 에서 승인자가 created_by·author_id 이면 NW016. 발행인이 신문사의 유일한 활성 staff 면 예외.
 10. rate_limit_take 뒤 raise: 같은 트랜잭션이라 실패한 호출(검증 오류)의 카운트는 롤백되어 세지 않는다. PG 에 자율 트랜잭션이 없어 DB 만으로는 실패 시도를 셀 수 없고, take 를 검증 뒤로 옮겨도 결과는 같아 그대로 두었다. 실패 시도 무차별 대입은 Route Handler·엣지 레이트 리밋이 막아야 한다(C3).
 11. 엠바고(S2): 구독 끊김 시각을 core 가 주지 않아 `newspapers.plan_lapsed_at` 을 두고 run_scheduled_publishing(매분)이 기록한다. 기록 전(최대 1분)에는 끊긴 신문사의 엠바고 기사가 모두 비공개(fail-closed), 기록 시각은 실제 끊김보다 최대 1분 늦다. 끊긴 시각은 실제 끊김이 아니라 예약 실행 시각(now())이라, 예약 실행이 밀리면 그만큼 창이 늘어난다(끊김 중 풀린 엠바고가 기록 순간 공개될 수 있음).
 12. 도메인 역할 재가입(S1): core 멤버십에 생성 시각이 없어, staff 합류(joined_at) 뒤 편집국 초대가 아닌 core 초대로 수락한 기록이 있으면 역할을 인정하지 않는다. 초대 없이 core 표에 직접 넣은 멤버십(운영 수작업)은 이 검사를 피한다. 또 core `revoke_invitation` 이 수락된 초대 행도 지우므로, owner 가 재가입 초대를 지우면 판정 근거가 사라져 예전 역할이 살아난다(owner 만 가능, 위험 낮음. core 에서 수락된 초대 삭제 금지가 근본 수정).

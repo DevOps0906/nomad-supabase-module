@@ -35,8 +35,15 @@ generator_profiles · saved_tickets · fortune_profiles: `updated_at not null de
 | private.saved_tickets_guard_transition · _check_source | 이관(내부 트리거) | nomad_lottolab_private.* | saved_tickets |
 | private.fortune_profiles_set_updated_at | 삭제 | nomad_core.touch_updated_at 로 대체 | — |
 | pg_cron: waitlist_purge_6m · rate_limits_purge · waitlist_purge_unconfirmed | 이관(pg_cron 있을 때만 등록) | 같은 이름 | 서버 |
-| EF account-delete | 레포 유지 | auth 사용자 삭제 → user안은 CASCADE 파기, org안은 개인 조직 삭제 필요(1인 조직 정리) | 모바일 |
+| EF account-delete | 레포 유지 | auth 사용자 삭제 → user안은 CASCADE 파기, org안은 삭제 **전에** `rpc('purge_personal_org_data', {p_user_id})`(결정 8) | 모바일 |
+| (신규, 2026-11-16 결정 8) purge_personal_org_data(user) | 신규(service_role만) | nomad_lottolab.purge_personal_org_data | EF account-delete |
 
 - EF의 `/rest/v1/rpc/…`·`/rest/v1/waitlist_signups` 호출은 `Content-Profile`/`Accept-Profile: nomad_lottolab` 헤더와 API 노출 스키마 설정이 필요하다(레포 수정은 이 작업 범위 밖, 팀장 확인).
 - 버킷: 없음(스토리지 사용 안 함).
 - 한도(plan_limits 키 후보): 현재 한도 컬럼 없음. 저장 티켓·프리셋 수 제한이 생기면 `saved_tickets_max`·`generator_profiles_max` 키로(수치 시드 안 함).
+
+## EF account-delete 계약 (org안, 2026-11-16 결정 8)
+1. EF(service_role)가 **auth 사용자 삭제 전에** `nomad_lottolab.purge_personal_org_data(p_user_id)`를 부른다. 삭제 뒤에는 멤버십이 사라져 대상 조직을 찾을 수 없다.
+2. 대상: `kind='personal'`이고 멤버가 그 사용자 1명뿐인 조직. 다른 사람이 함께 있는 조직·팀 조직은 건드리지 않는다.
+3. 조직 행은 남긴다(결제 원장·다른 제품 데이터 보존). nomad_lottolab 행(saved_tickets→draw_checks, generated_batches→generated_numbers, generator_profiles, fortune_profiles, user_consents)만 지운다. 반환 jsonb에 조직 수·표별 행 수.
+4. 그다음 auth 사용자를 삭제한다(fortune_profiles·user_consents·push_devices·subscription_accounts는 user_id CASCADE로도 지워진다). RPC가 실패하면 사용자 삭제를 하지 않고 재시도한다.

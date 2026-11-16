@@ -150,7 +150,7 @@ for p in ${UNIQ[@]+"${UNIQ[@]}"}; do
   key="${p%%:*}"; key="${key//-/_}"
   for f in "$DST"/*_"$key".sql; do
     [[ -e "$f" && -e "$SRC/$(basename "$f")" ]] || continue
-    echo "! $(basename "$f"): 옛 청사진(supabase/migrations) 설치본입니다. products/ 이식본과 겹치니 대상에서 정리하세요."
+    echo "! $(basename "$f"): 옛 청사진(supabase/migrations) 설치본입니다. products/ 이식본과 겹치니 대상에서 정리하세요(DB에 적용됐으면 백업 후 scripts/cleanup-legacy-blueprints.sh <DB 주소>)."
   done
 done
 LATEST=""

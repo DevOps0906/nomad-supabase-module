@@ -117,7 +117,7 @@ create table nomad_erp.products (
   sku             text not null constraint products_sku_check check (sku ~ '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'),
   name            text not null constraint products_name_check check (char_length(name) between 1 and 200),
   category        text not null default '기타' constraint products_category_check check (char_length(category) between 1 and 60),
-  price           numeric(12, 2) not null default 0 constraint products_price_check check (price >= 0),
+  price           bigint not null default 0 constraint products_price_check check (price >= 0),  -- 원(정수), 2026-11-16 결정 3
   quantity        integer not null default 0 constraint products_quantity_check check (quantity >= 0),
   safety_stock    integer not null default 10 constraint products_safety_stock_check check (safety_stock >= 0),
   is_low_stock    boolean generated always as (quantity <= safety_stock) stored,
@@ -159,8 +159,8 @@ create table nomad_erp.sales (
   organization_id uuid not null references nomad_core.organizations(id) on delete cascade,
   product_id      uuid not null,
   quantity        integer not null constraint sales_quantity_check check (quantity > 0),
-  unit_price      numeric(12, 2) not null constraint sales_unit_price_check check (unit_price >= 0),
-  total_price     numeric(14, 2) generated always as (unit_price * quantity) stored,
+  unit_price      bigint not null constraint sales_unit_price_check check (unit_price >= 0),
+  total_price     bigint generated always as (unit_price * quantity) stored,
   status          text not null default 'completed' constraint sales_status_check check (status in ('pending', 'completed', 'canceled')),
   sold_by         uuid,
   sold_at         timestamptz not null default now(),
@@ -177,31 +177,10 @@ create table nomad_erp.sales (
 );
 create index sales_org_completed_idx on nomad_erp.sales (organization_id, completed_at desc) where status = 'completed';
 create index sales_org_status_idx on nomad_erp.sales (organization_id, status, sold_at desc);
-comment on table nomad_erp.sales is '판매(pending/completed/canceled). 금액 컬럼은 원본의 numeric(원 단위, 소수 2자리). 전이는 트리거+RPC.';
+comment on table nomad_erp.sales is '판매(pending/completed/canceled). 금액 컬럼은 bigint(원, 정수 — 2026-11-16 결정 3). 전이는 트리거+RPC.';
 
--- 감사 로그(core 0004 audit_log 이식 전까지 제품 표). 기록은 write_audit만.
-create table nomad_erp.audit_logs (
-  id              bigint generated always as identity primary key,
-  organization_id uuid not null references nomad_core.organizations(id) on delete cascade,
-  actor_id        uuid,
-  action          text not null,
-  target_type     text not null,
-  target_id       text,
-  before_data     jsonb,
-  after_data      jsonb,
-  created_at      timestamptz not null default now()
-);
-create index audit_logs_org_created_idx on nomad_erp.audit_logs (organization_id, created_at desc);
-comment on table nomad_erp.audit_logs is '재고 조정·직원·판매 취소·가입 승인 감사 기록. master_admin 조회만, core audit_log 이식 후 대체 검토.';
-
-create function nomad_erp_private.write_audit(
-  p_org uuid, p_action text, p_target_type text, p_target_id text default null, p_before jsonb default null, p_after jsonb default null
-) returns void
-language sql security definer set search_path = ''
-as $$
-  insert into nomad_erp.audit_logs (organization_id, actor_id, action, target_type, target_id, before_data, after_data)
-  values (p_org, (select auth.uid()), p_action, p_target_type, p_target_id, p_before, p_after)
-$$;
+-- 감사 로그: nomad_core.write_audit(→ nomad_core.audit_log, action 접두 'erp.') — 2026-11-16 결정 4.
+-- before/after에 연락처(전화·이메일)를 넣지 않는다. 읽기는 owner·admin(= master_admin)이 rpc('nomad_audit_log').
 
 -- updated_at 트리거(증분 동기화)
 create trigger workspaces_touch before update on nomad_erp.workspaces for each row execute function nomad_core.touch_updated_at();
@@ -313,7 +292,6 @@ alter table nomad_erp.join_requests   enable row level security;
 alter table nomad_erp.products        enable row level security;
 alter table nomad_erp.inventory_moves enable row level security;
 alter table nomad_erp.sales           enable row level security;
-alter table nomad_erp.audit_logs      enable row level security;
 
 revoke all on all tables in schema nomad_erp from public, anon, authenticated;
 grant all on all tables in schema nomad_erp to service_role;
@@ -368,10 +346,6 @@ grant select on nomad_erp.sales to authenticated;
 create policy sales_select on nomad_erp.sales for select to authenticated
   using (nomad_erp.has_role(organization_id, array['master_admin', 'sales_manager']));
 
-grant select on nomad_erp.audit_logs to authenticated;
-create policy audit_logs_select on nomad_erp.audit_logs for select to authenticated
-  using (nomad_erp.has_role(organization_id, array['master_admin']));
-
 -- ---------- RPC ----------
 create function nomad_erp_private.new_join_code() returns text
 language plpgsql volatile set search_path = ''
@@ -411,7 +385,7 @@ begin
   returning * into v_row;
   insert into nomad_erp.join_codes (organization_id, join_code) values (p_organization_id, nomad_erp_private.new_join_code())
   on conflict (organization_id) do nothing;
-  perform nomad_erp_private.write_audit(p_organization_id, 'erp_workspace.register', 'organization', p_organization_id::text);
+  perform nomad_core.write_audit(p_organization_id, 'erp.erp_workspace.register', 'organization', p_organization_id::text);
   return v_row;
 end;
 $$;
@@ -440,7 +414,7 @@ begin
   if not found then
     raise exception 'rotate_join_code: workspace not found' using errcode = 'P0002';
   end if;
-  perform nomad_erp_private.write_audit(p_organization_id, 'erp_workspace.rotate_join_code', 'organization', p_organization_id::text);
+  perform nomad_core.write_audit(p_organization_id, 'erp.erp_workspace.rotate_join_code', 'organization', p_organization_id::text);
   return v_code;
 end;
 $$;
@@ -464,7 +438,7 @@ begin
       low_stock_alert = coalesce(p_low_stock_alert, low_stock_alert)
   where organization_id = p_organization_id
   returning * into v_row;
-  perform nomad_erp_private.write_audit(p_organization_id, 'erp_workspace.update', 'organization', p_organization_id::text,
+  perform nomad_core.write_audit(p_organization_id, 'erp.erp_workspace.update', 'organization', p_organization_id::text,
     jsonb_build_object('company_name', v_before.company_name, 'default_safety_stock', v_before.default_safety_stock, 'low_stock_alert', v_before.low_stock_alert),
     jsonb_build_object('company_name', v_row.company_name, 'default_safety_stock', v_row.default_safety_stock, 'low_stock_alert', v_row.low_stock_alert));
   return v_row;
@@ -566,12 +540,12 @@ begin
       set erp_role = excluded.erp_role, department_id = excluded.department_id, status = 'active', display_name = excluded.display_name;
     update nomad_erp.join_requests set status = 'approved', decided_by = (select auth.uid()), decided_at = now(), decision_note = p_note
     where id = p_request_id returning * into v_req;
-    perform nomad_erp_private.write_audit(v_req.organization_id, 'join_request.approve', 'user', v_req.user_id::text, null,
+    perform nomad_core.write_audit(v_req.organization_id, 'erp.join_request.approve', 'user', v_req.user_id::text, null,
                                           jsonb_build_object('erp_role', p_erp_role, 'department_id', p_department_id));
   else
     update nomad_erp.join_requests set status = 'rejected', decided_by = (select auth.uid()), decided_at = now(), decision_note = p_note
     where id = p_request_id returning * into v_req;
-    perform nomad_erp_private.write_audit(v_req.organization_id, 'join_request.reject', 'user', v_req.user_id::text);
+    perform nomad_core.write_audit(v_req.organization_id, 'erp.join_request.reject', 'user', v_req.user_id::text);
   end if;
   return v_req;
 end;
@@ -599,7 +573,7 @@ begin
     raise exception 'set_employee_role: employee not found' using errcode = 'P0002';
   end if;
   update nomad_erp.employees set erp_role = p_erp_role where organization_id = p_organization_id and user_id = p_user_id returning * into v_row;
-  perform nomad_erp_private.write_audit(p_organization_id, 'employee.role', 'user', p_user_id::text,
+  perform nomad_core.write_audit(p_organization_id, 'erp.employee.role', 'user', p_user_id::text,
                                         jsonb_build_object('erp_role', v_before.erp_role), jsonb_build_object('erp_role', p_erp_role));
   return v_row;
 end;
@@ -629,7 +603,7 @@ begin
     raise exception 'set_employee_status: employee not found' using errcode = 'P0002';
   end if;
   update nomad_erp.employees set status = p_status where organization_id = p_organization_id and user_id = p_user_id returning * into v_row;
-  perform nomad_erp_private.write_audit(p_organization_id, 'employee.status', 'user', p_user_id::text,
+  perform nomad_core.write_audit(p_organization_id, 'erp.employee.status', 'user', p_user_id::text,
                                         jsonb_build_object('status', v_before.status), jsonb_build_object('status', p_status));
   return v_row;
 end;
@@ -657,7 +631,7 @@ begin
       display_name = coalesce(nullif(btrim(p_display_name), ''), display_name)
   where organization_id = p_organization_id and user_id = p_user_id
   returning * into v_row;
-  perform nomad_erp_private.write_audit(p_organization_id, 'employee.update', 'user', p_user_id::text,
+  perform nomad_core.write_audit(p_organization_id, 'erp.employee.update', 'user', p_user_id::text,
     jsonb_build_object('department_id', v_before.department_id, 'position', v_before.position),
     jsonb_build_object('department_id', v_row.department_id, 'position', v_row.position));
   return v_row;
@@ -728,7 +702,7 @@ begin
   values (v_prod.organization_id, p_product_id, p_move_type, v_delta, v_prod.quantity + v_delta, nullif(btrim(p_reason), ''), p_request_id, (select auth.uid()))
   returning * into v_row;
   if p_move_type = 'ADJUSTMENT' then
-    perform nomad_erp_private.write_audit(v_prod.organization_id, 'inventory.adjust', 'product', p_product_id::text,
+    perform nomad_core.write_audit(v_prod.organization_id, 'erp.inventory.adjust', 'product', p_product_id::text,
                                           jsonb_build_object('quantity', v_prod.quantity), jsonb_build_object('quantity', v_row.quantity_after, 'reason', v_row.reason));
   end if;
   return v_row;
@@ -840,7 +814,7 @@ begin
   end if;
   update nomad_erp.sales set status = 'canceled', canceled_at = now(), canceled_by = (select auth.uid()), cancel_reason = btrim(p_reason)
   where id = p_sale_id returning * into v_sale;
-  perform nomad_erp_private.write_audit(v_sale.organization_id, 'sale.cancel', 'sale', p_sale_id::text,
+  perform nomad_core.write_audit(v_sale.organization_id, 'erp.sale.cancel', 'sale', p_sale_id::text,
                                         jsonb_build_object('status', v_prev), jsonb_build_object('status', 'canceled', 'reason', v_sale.cancel_reason));
   return v_sale;
 end;
@@ -860,7 +834,7 @@ begin
   end if;
   select jsonb_build_object(
     'kst_day_start', v_start,
-    'today_sales_total', coalesce((select sum(s.total_price) from nomad_erp.sales s
+    'today_sales_total', coalesce((select sum(s.total_price)::bigint from nomad_erp.sales s
                                     where s.organization_id = p_organization_id and s.status = 'completed'
                                       and s.completed_at >= v_start and s.completed_at < v_end), 0),
     'today_sales_count', (select count(*) from nomad_erp.sales s
@@ -884,7 +858,7 @@ $$;
 
 -- 판매 추이(KST 버킷). 기간 상한 = plan_limits 'sales_trend_days'(없으면 366일).
 create function nomad_erp.sales_trend(p_organization_id uuid, p_from timestamptz, p_to timestamptz, p_bucket text default 'hour')
-returns table (bucket_start timestamptz, total numeric, sale_count bigint)
+returns table (bucket_start timestamptz, total bigint, sale_count bigint)
 language plpgsql stable security definer set search_path = ''
 as $$
 declare v_days integer := least(366, coalesce(nomad_core.org_plan_limit(p_organization_id, 'erp', 'sales_trend_days'), 366));
@@ -898,7 +872,7 @@ begin
   end if;
   return query
     select (date_trunc(p_bucket, s.completed_at at time zone 'Asia/Seoul')) at time zone 'Asia/Seoul' as bucket_start,
-           sum(s.total_price) as total,
+           sum(s.total_price)::bigint as total,
            count(*) as sale_count
     from nomad_erp.sales s
     where s.organization_id = p_organization_id and s.status = 'completed' and s.completed_at >= p_from and s.completed_at < p_to

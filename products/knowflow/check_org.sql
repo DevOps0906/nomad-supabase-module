@@ -186,9 +186,30 @@ select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'answer_id')
 select public.t_expect(format($q$select nomad_knowflow.save_answer(%L, 'x')$q$, (select v from t_ids where k = 'an')), 'P0002');
 select public.t_expect($q$select nomad_knowflow.save_answer(gen_random_uuid(), 'x')$q$, 'P0002');
 select public.t_eq((select count(*) from nomad_knowflow.messages m where m.reply_to = (select v from t_ids where k = 'q1')), 1, '답변은 질문 참조');
+-- 질문 쿼터 환불(결정 2, service_role): 답변 있는 질문 KF409 · 1회만(이번 달 사용량 -1) · 환불된 질문 답변 저장 KF409
+-- · 지난달 차감분은 표식만 지우고 사용량 그대로 · 이관 행(표식 null)은 환불 안 함 · 사용자 롤 실행 불가
+select public.t_expect(format($q$select nomad_knowflow.refund_question_quota(%L)$q$, (select v from t_ids where k = 'q1')), 'KF409');
+select public.t_expect(format($q$select nomad_knowflow.refund_question_quota(%L)$q$, (select v from t_ids where k = 'an')), 'P0002');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q5')) ->> 'refunded')::boolean::int), 1, '질문 환불 성공');
+select public.t_eq((select used_questions from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 4, '질문 환불은 이번 달 사용량 -1');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q5')) ->> 'refunded')::boolean::int), 0, '재환불은 false(1회만)');
+select public.t_eq((select used_questions from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 4, '재환불은 사용량 변화 없음');
+select public.t_expect(format($q$select nomad_knowflow.save_answer(%L, 'x')$q$, (select v from t_ids where k = 'q5')), 'KF409');
+reset role;
+update nomad_knowflow.messages set quota_charged_period = (nomad_knowflow_private.current_period_start() - interval '1 month')::date where id = (select v from t_ids where k = 'q4');
+update nomad_knowflow.messages set quota_charged_period = null where id = (select v from t_ids where k = 'q3');
+select public.t_role('service_role');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q4')) ->> 'refunded')::boolean::int), 1, '지난달 차감분 환불은 표식만');
+select public.t_eq((select used_questions from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 4, '지난달 차감분 환불은 사용량 그대로');
+select public.t_eq((select (nomad_knowflow.refund_question_quota((select v from t_ids where k = 'q3')) ->> 'refunded')::boolean::int), 0, '이관 행(표식 null)은 환불 안 함');
+select public.t_eq((select count(*) from nomad_knowflow.messages where id = (select v from t_ids where k = 'q3') and quota_refunded_at is null), 1, '이관 행은 환불 표시 없음');
 select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
 select public.t_eq((select ((nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문', 'qk-1') ->> 'answer_id')::uuid
   = (select v from t_ids where k = 'an'))::int), 1, '질문 재요청은 답변 id도 반환');
+-- 환불된 질문을 같은 멱등 키로 다시 불러도 재차감 없이 refunded=true, 사용자는 환불 RPC 실행 불가
+select public.t_eq((select (nomad_knowflow.ask_question((select v from t_ids where k = 'cv'), '질문 5', 'qk-5') ->> 'refunded')::boolean::int), 1, '환불된 질문 재요청은 refunded');
+select public.t_eq((select used_questions from nomad_knowflow.org_quotas where organization_id = '01010101-0000-0000-0000-000000000001'), 4, '환불된 질문 재요청은 차감 없음');
+select public.t_expect(format($q$select nomad_knowflow.refund_question_quota(%L)$q$, (select v from t_ids where k = 'q2')), '42501');
 -- 보고서: 멱등 키 재요청 차감 1회 · 다른 내용 KF409 · 남의 프로젝트 P0002 · 생성 작업 실패 시 환불·failed
 insert into t_ids select 'rp', (nomad_knowflow.create_report((select v from t_ids where k = 'p1'), '보고서', 'rk-r1') ->> 'report_id')::uuid;
 select public.t_eq((select ((r ->> 'duplicate')::boolean and (r ->> 'report_id')::uuid = (select v from t_ids where k = 'rp'))::int
@@ -281,6 +302,227 @@ update nomad_core.subscriptions set status = 'active', starts_at = now() - inter
 select public.t_role('service_role');
 select public.t_expect(format($q$insert into nomad_knowflow.conversations (project_id, organization_id) values (%L, '01010101-0000-0000-0000-000000000001')$q$, (select v from t_ids where k = 'p1')), 'KF403');
 reset role;
+
+-- ===== 0003: 영상 요약 격리·권한 + 권리자 삭제(takedown) 뒤 재저장 거부 =====
+-- 자료 3개: ta(A, 영상 tkdnvideo01) · tb(B, 같은 영상) · tc(A, 다른 영상 othervideo1). 자료마다 running 작업 jr_* · succeeded 작업 jd_*
+reset role;
+insert into t_ids (k, v) select k, gen_random_uuid() from unnest(array['ta', 'tb', 'tc', 'jr_ta', 'jr_tb', 'jr_tc', 'jd_ta', 'jd_tb', 'jd_tc']) k;
+insert into nomad_knowflow.sources (id, project_id, organization_id, source_type, title, original_url, video_id, duration_seconds, status)
+select (select v from t_ids where k = x.k), (select v from t_ids where k = x.pk), x.o::uuid, 'youtube', '영상 ' || x.k,
+       'https://www.youtube.com/watch?v=' || x.vid, x.vid, 100, 'processing'
+  from (values ('ta', 'p1', '01010101-0000-0000-0000-000000000001', 'tkdnvideo01'), ('tb', 'p2', '02020202-0000-0000-0000-000000000002', 'tkdnvideo01'), ('tc', 'p1', '01010101-0000-0000-0000-000000000001', 'othervideo1')) x(k, pk, o, vid);
+insert into nomad_knowflow.processing_jobs (id, organization_id, source_id, job_type, status, attempt_count, started_at)
+select (select v from t_ids where k = 'jr_' || s.title_k), s.organization_id, s.id, 'source_ingest', 'running', 1, now()
+  from (select substr(title, 4) as title_k, * from nomad_knowflow.sources where id in (select v from t_ids where k in ('ta', 'tb', 'tc'))) s;
+insert into nomad_knowflow.processing_jobs (id, organization_id, source_id, job_type, status, progress, attempt_count, started_at, finished_at)
+select (select v from t_ids where k = 'jd_' || s.title_k), s.organization_id, s.id, 'source_ingest', 'succeeded', 100, 1, now(), now()
+  from (select substr(title, 4) as title_k, * from nomad_knowflow.sources where id in (select v from t_ids where k in ('ta', 'tb', 'tc'))) s;
+create temp table t_kf3 (k text primary key, ok boolean);
+grant all on t_kf3 to public;
+select public.t_role('service_role');
+insert into t_kf3 select 'chunks_' || x.k, nomad_knowflow.replace_source_chunks((select v from t_ids where k = 'jr_' || x.k), 1,
+  '[{"chunk_index":0,"content":"청크 0","locator":{"t_start":0}},{"chunk_index":1,"content":"청크 1","locator":{"t_start":10}}]'::jsonb)
+  from (values ('ta'), ('tb'), ('tc')) x(k);
+insert into t_kf3 select 'moments_' || x.k, nomad_knowflow.replace_source_moments((select v from t_ids where k = 'jr_' || x.k), 1,
+  '[{"moment_index":0,"locator":{"t_start":0,"t_end":10},"title":"장면","description":"설명"}]'::jsonb)
+  from (values ('ta'), ('tb'), ('tc')) x(k);
+insert into t_kf3 select 'summary_' || x.k, nomad_knowflow.save_source_summary((select v from t_ids where k = 'jd_' || x.k),
+  jsonb_build_array(jsonb_build_object('text', '요약 문장', 'chunk_ids',
+    (select jsonb_agg(c.id::text) from nomad_knowflow.source_chunks c where c.source_id = (select v from t_ids where k = x.k)))), 'test-model')
+  from (values ('ta'), ('tb'), ('tc')) x(k);
+select public.t_eq((select count(*) from t_kf3 where ok), 9, '0003 준비: 청크·장면·요약 저장 9건');
+reset role;
+
+-- 요약 격리: 자기 조직 요약만
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 2, 'A는 자기 조직 요약 2건만');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries where source_id = (select v from t_ids where k = 'tb')), 0, 'A는 B 요약 안 보임');
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 1, 'B는 자기 조직 요약 1건만');
+select public.t_login('cccccccc-0000-0000-0000-00000000000c');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 2, 'viewer C는 조직 1 요약 2건 읽기');
+-- service_role 외 실행·직접 쓰기 거부
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.save_source_summary(%L, '[{"text":"x","chunk_ids":[]}]', 'm')$q$, (select v from t_ids where k = 'jd_ta')), '42501');
+select public.t_expect($q$select nomad_knowflow.takedown_video('tkdnvideo01', '사유')$q$, '42501');
+select public.t_expect(format($q$select nomad_knowflow.replace_source_moments(%L, 1, '[]')$q$, (select v from t_ids where k = 'jr_ta')), '42501');
+select public.t_expect(format($q$update nomad_knowflow.source_summaries set model = 'x' where source_id = %L$q$, (select v from t_ids where k = 'ta')), '42501');
+select public.t_expect(format($q$delete from nomad_knowflow.source_summaries where source_id = %L$q$, (select v from t_ids where k = 'ta')), '42501');
+select public.t_role('anon');
+select public.t_expect($q$select nomad_knowflow.takedown_video('tkdnvideo01', '사유')$q$, '42501');
+select public.t_expect($q$select * from nomad_knowflow.source_summaries$q$, '42501');
+
+-- takedown: 같은 영상의 모든 조직 자료 비활성 + 청크·장면·요약 삭제, 진행 중 작업 수 반환
+select public.t_role('service_role');
+select public.t_expect($q$select nomad_knowflow.takedown_video('bad', '사유')$q$, '22023');
+select public.t_expect($q$select nomad_knowflow.takedown_video('tkdnvideo01', '  ')$q$, '22023');
+delete from t_job;
+insert into t_job select nomad_knowflow.takedown_video('tkdnvideo01', '권리자 요청(합성)');
+select public.t_eq((select (j ->> 'sources')::int from t_job), 2, 'takedown 자료 2건(A·B)');
+select public.t_eq((select (j ->> 'chunks_deleted')::int from t_job), 4, 'takedown 청크 4건 삭제');
+select public.t_eq((select (j ->> 'moments_deleted')::int from t_job), 2, 'takedown 장면 2건 삭제');
+select public.t_eq((select (j ->> 'summaries_deleted')::int from t_job), 2, 'takedown 요약 2건 삭제');
+select public.t_eq((select (j ->> 'active_jobs')::int from t_job), 2, 'takedown 진행 중 작업 2건');
+-- takedown 뒤 진행 중 작업의 재저장 거부(false, 아무것도 안 바뀜)
+select public.t_eq((select count(*) from nomad_knowflow.replace_source_chunks((select v from t_ids where k = 'jr_ta'), 1,
+  '[{"chunk_index":0,"content":"되살림","locator":{}}]'::jsonb) r where not r), 1, 'takedown 뒤 replace_source_chunks 거부');
+select public.t_eq((select count(*) from nomad_knowflow.replace_source_moments((select v from t_ids where k = 'jr_ta'), 1,
+  '[{"moment_index":0,"locator":{"t_start":0,"t_end":10},"title":"장면","description":"설명"}]'::jsonb) r where not r), 1, 'takedown 뒤 replace_source_moments 거부');
+select public.t_eq((select count(*) from nomad_knowflow.save_source_summary((select v from t_ids where k = 'jd_tb'),
+  '[{"text":"되살림","chunk_ids":["00000000-0000-0000-0000-000000000000"]}]'::jsonb, 'm') r where not r), 1, 'takedown 뒤 save_source_summary 거부');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow.source_chunks where source_id in (select v from t_ids where k in ('ta', 'tb'))), 0, 'takedown 자료 청크 0');
+select public.t_eq((select count(*) from nomad_knowflow.source_moments where source_id in (select v from t_ids where k in ('ta', 'tb'))), 0, 'takedown 자료 장면 0');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries where source_id in (select v from t_ids where k in ('ta', 'tb'))), 0, 'takedown 자료 요약 0');
+-- 다른 영상(tc)은 영향 없음
+select public.t_eq((select count(*) from nomad_knowflow.sources where id = (select v from t_ids where k = 'tc') and unavailable_at is null), 1, '다른 영상 자료 활성 유지');
+select public.t_eq((select count(*) from nomad_knowflow.source_chunks where source_id = (select v from t_ids where k = 'tc')), 2, '다른 영상 청크 유지');
+select public.t_eq((select count(*) from nomad_knowflow.source_moments where source_id = (select v from t_ids where k = 'tc')), 1, '다른 영상 장면 유지');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries where source_id = (select v from t_ids where k = 'tc')), 1, '다른 영상 요약 유지');
+select public.t_eq((select count(*) from nomad_core.audit_log where action = 'knowflow.rights_takedown' and target_id = 'tkdnvideo01'), 1, 'takedown 감사 기록 1건');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 1, 'takedown 뒤 A 요약은 다른 영상 1건');
+reset role;
+
+-- ===== 0004: L1 캡처 소유 조직 격리·영상당 20장·영상 삭제/비활성 시 제거·Storage 정책 =====
+-- (KNOWFLOW packages/db-tests/sql/captures_check_org.sql에서 옮김. 사용자·조직 1·2·멤버십은 맨 위 준비를 그대로 쓴다)
+reset role;
+-- 앞 잠금 검사에서 만료시킨 조직 1 구독을 다시 연다(knowledge_base 필요)
+update nomad_core.subscriptions set ends_at = null
+ where organization_id = '01010101-0000-0000-0000-000000000001' and product_code = 'knowflow';
+-- 준비(postgres): O1 프로젝트, 유튜브 자료 2개(y1·y2)·PDF 자료 1개, 장면 카드
+insert into nomad_knowflow.projects (id, organization_id, name) values
+  ('10000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'O1 프로젝트');
+insert into nomad_knowflow.sources (id, project_id, organization_id, source_type, title, original_url, video_id, status) values
+  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001',
+   'youtube', '영상 1', 'https://www.youtube.com/watch?v=capvideo001', 'capvideo001', 'completed'),
+  ('20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001',
+   'youtube', '영상 2', 'https://www.youtube.com/watch?v=capvideo002', 'capvideo002', 'completed');
+insert into nomad_knowflow.sources (id, project_id, organization_id, source_type, title, storage_path, status) values
+  ('20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001',
+   'pdf', '문서', '01010101-0000-0000-0000-000000000001/10000000-0000-0000-0000-000000000001/x.pdf', 'completed');
+insert into nomad_knowflow.source_moments (id, source_id, project_id, organization_id, moment_index, locator, title, description) values
+  ('30000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
+   '01010101-0000-0000-0000-000000000001', 0, '{"t_start": 12.5, "t_end": 30}', '장면 1', '설명'),
+  ('30000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001',
+   '01010101-0000-0000-0000-000000000001', 0, '{"t_start": 5, "t_end": 9}', '장면 2', '설명');
+
+create temp table t_cap (k text primary key, j jsonb);
+grant all on t_cap to public;
+
+-- ===== 입력 검증 =====
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'image/jpeg', 100)$q$, '22023');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'image/png', 2097153)$q$, '22023');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000001', 'image/png', 100)$q$, '22023');
+-- 다른 자료의 장면 카드
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002', 'image/png', 100)$q$, 'P0002');
+
+-- ===== 영상당 20장, 21장째 거절 =====
+insert into t_cap select 'first', nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'image/webp', 1000);
+select public.t_eq((select count(*) from t_cap where j ->> 'storage_path' like
+  '01010101-0000-0000-0000-000000000001/10000000-0000-0000-0000-000000000001/20000000-0000-0000-0000-000000000001/%.webp'), 1, '경로 = 조직/프로젝트/자료/캡처.webp');
+select public.t_eq((select ((j ->> 't_seconds')::numeric * 10)::bigint from t_cap where k = 'first'), 125, '시각 = 장면 카드 t_start');
+select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'image/png', 1000)
+  from generate_series(2, 20);
+select public.t_eq((select count(*) from nomad_knowflow.source_captures), 20, 'A는 20장 조회');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'image/png', 1000)$q$, 'KF429');
+select public.t_eq((select count(*) from nomad_knowflow.source_captures), 20, '21장째 거절 후에도 20장');
+-- 다른 영상은 따로 센다
+insert into t_cap select 'y2', nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'image/png', 1000);
+
+-- Storage: 행 경로에는 업로드 가능, 행 없는 경로는 불가
+insert into storage.objects (bucket_id, name, metadata)
+select 'knowflow-captures', j ->> 'storage_path', '{"size": 1000, "mimetype": "image/webp"}'::jsonb from t_cap where k = 'first';
+select public.t_expect($q$insert into storage.objects (bucket_id, name) values ('knowflow-captures', '01010101-0000-0000-0000-000000000001/10000000-0000-0000-0000-000000000001/20000000-0000-0000-0000-000000000001/99999999-9999-9999-9999-999999999999.png')$q$, '42501');
+select public.t_eq((select count(*) from storage.objects where bucket_id = 'knowflow-captures'), 1, 'A는 자기 캡처 객체 조회');
+
+-- ===== viewer C: 읽기만 =====
+select public.t_login('cccccccc-0000-0000-0000-00000000000c');
+select public.t_eq((select count(*) from nomad_knowflow.source_captures), 21, 'viewer는 조직 캡처 읽기');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'image/png', 1000)$q$, 'P0002');
+select public.t_eq((select nomad_knowflow.discard_source_capture((select (j ->> 'capture_id')::uuid from t_cap where k = 'y2'))::int), 0, 'viewer는 캡처 삭제 불가');
+
+-- ===== B(조직 2): 타인 캡처 접근 불가 =====
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_eq((select count(*) from nomad_knowflow.source_captures), 0, 'B는 조직 1 캡처를 볼 수 없음');
+select public.t_eq((select count(*) from storage.objects where bucket_id = 'knowflow-captures'), 0, 'B는 조직 1 캡처 객체를 볼 수 없음');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'image/png', 1000)$q$, 'P0002');
+select public.t_eq((select nomad_knowflow.discard_source_capture((select (j ->> 'capture_id')::uuid from t_cap where k = 'y2'))::int), 0, 'B는 조직 1 캡처 삭제 불가');
+select public.t_expect(format($q$insert into storage.objects (bucket_id, name) values ('knowflow-captures', %L)$q$,
+  '02020202-0000-0000-0000-000000000002/' || (select j ->> 'storage_path' from t_cap where k = 'y2')), '42501');
+select public.t_expect($q$insert into nomad_knowflow.source_captures (source_id, project_id, organization_id, t_seconds, mime_type, byte_size, storage_path, created_by) values ('20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 0, 'image/png', 1, 'x', 'bbbbbbbb-0000-0000-0000-00000000000b')$q$, '42501');
+select public.t_expect($q$select nomad_knowflow.claim_capture_object_trash(10)$q$, '42501');
+select public.t_expect($q$select nomad_knowflow.ack_capture_object_trash(array['x'])$q$, '42501');
+select public.t_expect($q$select * from nomad_knowflow_private.capture_object_trash$q$, '42501');
+select public.t_expect($q$select * from nomad_knowflow.list_stalled_capture_object_trash(10)$q$, '42501');
+
+-- ===== 업로드 실패 정리: discard → 정리 대기열 =====
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select nomad_knowflow.discard_source_capture((select (j ->> 'capture_id')::uuid from t_cap where k = 'y2'))::int), 1, 'A는 방금 만든 캡처 삭제');
+
+-- ===== 영상 삭제 시 캡처 제거 =====
+select nomad_knowflow.delete_sources('10000000-0000-0000-0000-000000000001', array['20000000-0000-0000-0000-000000000001'::uuid]);
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow.source_captures where source_id = '20000000-0000-0000-0000-000000000001'), 0, '자료 삭제 시 캡처 행 제거');
+select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_trash), 21, '지운 캡처 경로 21개 정리 대기(삭제 20 + discard 1)');
+-- 고아가 된 객체는 아무도 읽을 수 없다(객체 삭제는 Storage API로 하므로 SQL 검사 밖: 직접 delete는 storage.protect_delete가 막는다)
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select count(*) from storage.objects where bucket_id = 'knowflow-captures'), 0, '행이 지워진 객체는 읽기 불가');
+reset role;
+
+-- ===== 비활성(권리자 요청) 시 캡처 제거 =====
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'image/png', 1000);
+select public.t_role('service_role');
+select nomad_knowflow.takedown_video('capvideo002', '권리자 요청(검사)');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow.source_captures), 0, '비활성 시 캡처 행 제거');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect($q$select nomad_knowflow.create_source_capture('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'image/png', 1000)$q$, 'KF410');
+
+-- ===== 정리 대기열: service_role만 꺼낸다 =====
+select public.t_role('service_role');
+create temp table t_claim (k text primary key, paths text[]);
+grant all on t_claim to public;
+insert into t_claim select 'c1', nomad_knowflow.claim_capture_object_trash(1000);
+select public.t_eq((select cardinality(paths) from t_claim where k = 'c1'), 22, 'service_role이 정리 대기 경로 22개를 맡음');
+select public.t_eq((select cardinality(nomad_knowflow.claim_capture_object_trash(1000))), 0, '맡은 경로는 15분 안에 다시 나오지 않음');
+select public.t_expect($q$select nomad_knowflow.claim_capture_object_trash(0)$q$, '22023');
+select public.t_expect($q$select nomad_knowflow.ack_capture_object_trash(null)$q$, '22023');
+-- Storage 삭제 성공분(10개)만 ack, 나머지 12개는 실패로 보고 ack하지 않는다
+select public.t_eq((select nomad_knowflow.ack_capture_object_trash((select paths[1:10] from t_claim where k = 'c1'))), 10, 'ack한 10개만 대기열에서 빠짐');
+select public.t_eq((select nomad_knowflow.ack_capture_object_trash((select paths[1:10] from t_claim where k = 'c1'))), 0, '같은 ack 재전송은 0(멱등)');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_trash), 12, 'ack 안 한 12개는 대기열에 남음(경로 유실 없음)');
+-- 오래된 claim(15분 초과)은 다시 배정된다
+update nomad_knowflow_private.capture_object_trash set claimed_at = now() - interval '16 minutes';
+select public.t_role('service_role');
+insert into t_claim select 'c2', nomad_knowflow.claim_capture_object_trash(1000);
+select public.t_eq((select cardinality(paths) from t_claim where k = 'c2'), 12, '오래된 claim 12개 재배정');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_trash where attempts = 2), 12, '재배정 시 시도 횟수 2');
+select public.t_role('service_role');
+select public.t_eq((select nomad_knowflow.ack_capture_object_trash((select paths from t_claim where k = 'c2'))), 12, '재시도 성공분 ack');
+reset role;
+-- 시도 상한: attempts 10 이상은 배정하지 않고 행은 남긴다(운영자 확인용)
+insert into nomad_knowflow_private.capture_object_trash (storage_path, claimed_at, attempts) values
+  ('stall/a.png', now() - interval '1 hour', 10), ('stall/b.png', now() - interval '1 hour', 12),
+  ('stall/c.png', now() - interval '1 hour', 9), ('stall/d.png', null, 10);
+select public.t_role('service_role');
+insert into t_claim select 'c3', nomad_knowflow.claim_capture_object_trash(1000);
+select public.t_eq((select cardinality(paths) from t_claim where k = 'c3'), 1, '시도 상한(10) 미만 1개만 배정');
+select public.t_eq((select (paths[1] = 'stall/c.png')::int from t_claim where k = 'c3'), 1, '9회 경로는 마지막 시도로 배정');
+select public.t_eq((select count(*) from nomad_knowflow.list_stalled_capture_object_trash(1000)), 4, '상한 걸린 경로 4개(9→10 포함) 조회');
+select public.t_eq((select max(stalled_total) from nomad_knowflow.list_stalled_capture_object_trash(1)), 4, 'limit 1이어도 전체 수 4');
+select public.t_expect($q$select * from nomad_knowflow.list_stalled_capture_object_trash(0)$q$, '22023');
+reset role;
+update nomad_knowflow_private.capture_object_trash set claimed_at = now() - interval '16 minutes';
+select public.t_role('service_role');
+select public.t_eq((select cardinality(nomad_knowflow.claim_capture_object_trash(1000))), 0, '상한 넘은 행은 15분 지나도 미배정');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_trash where storage_path like 'stall/%'), 4, '상한 넘은 행은 대기열에 남음');
+
 
 select 'ORG CHECK PASSED' as result;
 rollback;

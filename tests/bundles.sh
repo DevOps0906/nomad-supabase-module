@@ -6,7 +6,8 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MONO=(contentflow humscore knowflow lottolab shorts)   # build-bundles.sh 의 모노레포 5개와 같게
-# 표본: 모노레포 + 새 제품 single 3개(확장 pg_trgm · user안 · 청사진과 같은 스키마 이름) + 격리형
+# 표본: 모노레포 + 새 제품 single 3개(core pg_trgm 마이그레이션에 기대는 news · user안 · 청사진과 같은 스키마 이름) + 격리형
+# pg_trgm 은 core *_nomad_core_pg_trgm.sql 이 만들고 knowflow·news 이식본은 extensions 스키마에 있는지만 검사한다(2026-11-16 결정 5)
 SAMPLE=(monorepo single/news single/astro single/baedal isolated/hospital)
 LOGDIR="$ROOT/.nomad/logs"; mkdir -p "$LOGDIR"
 BASE_TMP="$(mktemp -d)"

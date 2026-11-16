@@ -1,7 +1,7 @@
--- ContentFlow org안 검사: 조직 2곳 교차 접근 거부 · 역할별 권한 · 승인 흐름 · 한도 · 동기화 컬럼. 합성 데이터만, 마지막에 rollback.
+-- ContentFlow org안 검사: 조직 2곳 교차 접근 거부 · 역할별 권한 · 승인 흐름 · 한도 · 동기화 컬럼 · 발행 큐 · 분석 연결(0002). 합성 데이터만, 마지막에 rollback.
 -- 실행(저장소 루트에서; org 파일의 begin/commit을 빼고 한 트랜잭션으로 합친다):
 --   { sed '/^-- @@APPLY/,$d' products/contentflow/check_org.sql
---     sed '/^begin;$/d;/^commit;$/d' products/contentflow/org/0001_contentflow.sql
+--     sed '/^begin;$/d;/^commit;$/d' products/contentflow/org/0*.sql
 --     sed -n '/^-- @@APPLY/,$p' products/contentflow/check_org.sql; } \
 --   | docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1
 begin;
@@ -213,6 +213,95 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
 select zz_check.denied('select * from nomad_contentflow_private.rate_limits');
 select zz_check.denied($$select nomad_core.org_plan_limit('00000000-0000-0000-0000-00000000000a', 'contentflow', 'max_blogs')$$);
+reset role;
+
+-- ==== 7. 발행 큐(0002): 조직 A editor만 큐에 넣고 가져가고 끝낸다, 조직 B는 아무것도 못 본다 ====
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a3","role":"authenticated"}', true);
+update nomad_contentflow.articles set state = 'export_ready' where id = '00000000-0000-0000-0000-0000000000c3';
+select zz_check.denied($$insert into nomad_contentflow.publish_jobs (organization_id, article_id, approved_version_id, remote_key, idempotency_key) select organization_id, article_id, id, 'site-a', 'x' from nomad_contentflow.article_versions$$);
+select zz_check.expect($$select count(*) from nomad_contentflow.enqueue_publish_job('00000000-0000-0000-0000-0000000000c3', 'site-a') where not duplicate$$, 1);
+select zz_check.expect($$select count(*) from nomad_contentflow.enqueue_publish_job('00000000-0000-0000-0000-0000000000c3', 'site-a') where duplicate$$, 1);
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}', true);
+select zz_check.expect('select count(*) from nomad_contentflow.publish_jobs', 0);
+select zz_check.fails_with($$select * from nomad_contentflow.enqueue_publish_job('00000000-0000-0000-0000-0000000000c3', 'site-a')$$, 'FORBIDDEN_ROLE');
+select zz_check.expect($$select count(*) from nomad_contentflow.claim_publish_job('site-a')$$, 0);
+select zz_check.fails_with($$select nomad_contentflow.cancel_publish_job((select id from nomad_contentflow.publish_jobs limit 1))$$, 'FORBIDDEN_ROLE');
+reset role;
+select zz_check.fails_with($$select nomad_contentflow.cancel_publish_job((select id from nomad_contentflow.publish_jobs limit 1))$$, 'FORBIDDEN_ROLE');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a5","role":"authenticated"}', true);
+select zz_check.fails_with($$select * from nomad_contentflow.enqueue_publish_job('00000000-0000-0000-0000-0000000000c3', 'site-a')$$, 'FORBIDDEN_ROLE');
+-- u5는 개인 조직 owner라 호출은 되지만 조직 A 작업은 가져가지 못한다
+select zz_check.expect($$select count(*) from nomad_contentflow.claim_publish_job('site-a')$$, 0);
+select zz_check.expect('select count(*) from nomad_contentflow.publish_jobs', 1);
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a3","role":"authenticated"}', true);
+select zz_check.expect($$select count(*) from nomad_contentflow.claim_publish_job('site-a')$$, 1);
+select zz_check.expect($$select count(*) from nomad_contentflow.articles where id = '00000000-0000-0000-0000-0000000000c3' and state = 'publishing'$$, 1);
+select zz_check.expect($$select count(*) from nomad_contentflow.claim_publish_job('site-a')$$, 0);
+select zz_check.fails_with($$select nomad_contentflow.cancel_publish_job((select id from nomad_contentflow.publish_jobs limit 1))$$, 'JOB_RUNNING');
+select zz_check.expect($$select count(*) from nomad_contentflow.publish_jobs j where nomad_contentflow.finish_publish_job(j.id, 'success') = 'draft_created'$$, 1);
+select zz_check.expect($$select count(*) from nomad_contentflow.articles where id = '00000000-0000-0000-0000-0000000000c3' and state = 'draft_created'$$, 1);
+reset role;
+
+-- ==== 8. 분석 연결·자격·동기화(0002): owner/admin만, 조직 B 차단, 동기화 행 위조 거부 ====
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
+select zz_check.expect($$select count(*) from nomad_contentflow.store_credential('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000d1', 'sub-1', 'client-1', 'cipher', 1) g where g = '00000000-0000-0000-0000-0000000000d1'$$, 1);
+select zz_check.denied('select * from nomad_contentflow.analytics_credentials');
+select zz_check.fails_with($$insert into nomad_contentflow.analytics_connections (organization_id, blog_id, grant_id, provider, external_ref, connected_by, status) values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000d1', 'gsc', 'sc-domain:a', '00000000-0000-0000-0000-0000000000a1', 'active')$$, 'CONNECTION_STATE_FORBIDDEN');
+insert into nomad_contentflow.analytics_connections (id, organization_id, blog_id, grant_id, provider, external_ref, connected_by)
+  values ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000b1',
+          '00000000-0000-0000-0000-0000000000d1', 'gsc', 'sc-domain:a', '00000000-0000-0000-0000-0000000000a1');
+select zz_check.fails_with($$update nomad_contentflow.analytics_connections set status = 'active'$$, 'CONNECTION_STATE_FORBIDDEN');
+select zz_check.expect($$select count(*) from nomad_contentflow.read_credential('00000000-0000-0000-0000-0000000000e1') where ciphertext = 'cipher'$$, 1);
+select zz_check.expect($$select count(*) from nomad_contentflow.begin_sync_run('00000000-0000-0000-0000-0000000000e1', '2026-01-01', '2026-01-02')$$, 1);
+select zz_check.fails_with($$select nomad_contentflow.begin_sync_run('00000000-0000-0000-0000-0000000000e1', '2026-01-01', '2026-01-02')$$, 'SYNC_RUNNING');
+select zz_check.expect($$select nomad_contentflow.replace_synced_range('00000000-0000-0000-0000-0000000000e1', (select id from nomad_contentflow.analytics_sync_runs), '2026-01-01', '2026-01-02',
+  '[{"metric":"clicks","scope":"site","dimension":"","value":3,"measured_on":"2026-01-01"},{"metric":"clicks","scope":"site","dimension":"","value":4,"measured_on":"2026-01-02"}]'::jsonb)$$, 2);
+select zz_check.expect($$select count(*) from nomad_contentflow.blog_metric_snapshots where tool = 'gsc-api' and connection_id is not null$$, 2);
+select zz_check.expect($$select count(*) from nomad_contentflow.analytics_connections where status = 'active'$$, 1);
+select zz_check.fails_with($$insert into nomad_contentflow.blog_metric_snapshots (organization_id, blog_id, tool, metric, value, measured_on, created_by) values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000b1', 'gsc-api', 'm', 1, '2026-01-03', '00000000-0000-0000-0000-0000000000a1')$$, 'SYNCED_ROW_FORBIDDEN');
+select zz_check.fails_with($$insert into nomad_contentflow.revenue_rows (organization_id, row_key, source, status, currency, report_date, revenue, timezone, period_start, period_end, created_by) values ('00000000-0000-0000-0000-00000000000a', 'k9', 'adsense-api', 'estimated', 'USD', '2026-01-02', 1, 'UTC', '2026-01-01', '2026-01-31', '00000000-0000-0000-0000-0000000000a1')$$, 'SYNCED_ROW_FORBIDDEN');
+select zz_check.fails_with($$select nomad_contentflow.delete_credential('00000000-0000-0000-0000-0000000000d1')$$, 'GRANT_IN_USE');
+reset role;
+-- editor·조직 B는 자격·연결 RPC 거부, B는 A의 연결·실행 기록을 못 본다
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a3","role":"authenticated"}', true);
+select zz_check.fails_with($$select * from nomad_contentflow.read_credential('00000000-0000-0000-0000-0000000000e1')$$, 'ANALYTICS_FORBIDDEN');
+select zz_check.denied($$insert into nomad_contentflow.analytics_connections (organization_id, grant_id, provider, external_ref, connected_by) values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000d1', 'adsense', 'pub-1', '00000000-0000-0000-0000-0000000000a3')$$);
+select zz_check.expect('select count(*) from nomad_contentflow.analytics_connections', 1);
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}', true);
+select zz_check.expect('select count(*) from nomad_contentflow.analytics_connections', 0);
+select zz_check.expect('select count(*) from nomad_contentflow.analytics_sync_runs', 0);
+select zz_check.fails_with($$select * from nomad_contentflow.read_credential('00000000-0000-0000-0000-0000000000e1')$$, 'ANALYTICS_FORBIDDEN');
+select zz_check.fails_with($$select * from nomad_contentflow.read_grant_credential('00000000-0000-0000-0000-0000000000d1')$$, 'ANALYTICS_FORBIDDEN');
+select zz_check.fails_with($$select nomad_contentflow.disconnect_connection('00000000-0000-0000-0000-0000000000e1', true)$$, 'ANALYTICS_FORBIDDEN');
+select zz_check.fails_with($$select nomad_contentflow.store_credential('00000000-0000-0000-0000-00000000000a', gen_random_uuid(), 's', 'c', 'x', 1)$$, 'ANALYTICS_FORBIDDEN');
+-- B는 A의 연결을 자기 조직 행에 붙일 수 없다(복합 FK)
+select zz_check.denied($$insert into nomad_contentflow.analytics_connections (organization_id, grant_id, provider, external_ref, connected_by) values ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000d1', 'adsense', 'pub-2', '00000000-0000-0000-0000-0000000000a2')$$);
+reset role;
+-- 동의자(u1)가 owner를 잃으면 연결은 needs_reauth, 자격 읽기 거부
+insert into nomad_core.memberships (organization_id, user_id, role) values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a2', 'owner');
+update nomad_core.memberships set role = 'editor' where organization_id = '00000000-0000-0000-0000-00000000000a' and user_id = '00000000-0000-0000-0000-0000000000a1';
+select zz_check.expect($$select count(*) from nomad_contentflow.analytics_connections where status = 'needs_reauth'$$, 1);
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}', true);
+select zz_check.fails_with($$select * from nomad_contentflow.read_credential('00000000-0000-0000-0000-0000000000e1')$$, 'CONNECTION_NOT_ACTIVE');
+select zz_check.fails_with($$select * from nomad_contentflow.read_grant_credential('00000000-0000-0000-0000-0000000000d1')$$, 'GRANT_OWNER_INACTIVE');
+-- 끊기(삭제): 동기화 행과 연결이 사라지고, 남은 사용 연결 0
+select zz_check.expect($$select nomad_contentflow.disconnect_connection('00000000-0000-0000-0000-0000000000e1', true)$$, 0);
+select zz_check.expect($$select count(*) from nomad_contentflow.blog_metric_snapshots where tool = 'gsc-api'$$, 0);
+reset role;
+set local role anon;
+select zz_check.denied($$select nomad_contentflow.claim_publish_job('site-a')$$);
+select zz_check.denied('select count(*) from nomad_contentflow.analytics_connections');
 reset role;
 
 select 'check_org OK' as result;
