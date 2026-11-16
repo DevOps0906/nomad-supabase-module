@@ -118,3 +118,22 @@ anon에게 주는 권한은 없다(원본도 공개 읽기 없음). 공용 읽�
 - `extension_issue`는 p_organization_id를 검증하지 않는다(service_role 전용). 앱 서버는 발급 전에 호출자가 그 조직의 owner·admin인지(`nomad_core.organization_role`) 반드시 확인한다. 비멤버 발급 거부는 앱 책임이다.
 - `rate_hit` 키는 호출자가 만든 문자열이다. IP·사용자 값은 서버에서 정규화·해시해 넣는다(예: `ip:<sha256 앞 32자>`). 원문 IP를 그대로 넣지 않는다(행 무한 증가·개인정보).
 - `job_queue_status`는 다른 조직 작업을 수(순번·예상 시간)로만 반영한다. 조직·프로젝트 식별자는 노출하지 않지만 전체 큐 부하는 간접적으로 드러난다(설계상 수용).
+
+## 8. 운영 데이터 이관 (task-032, org안)
+스크립트·절차: Shorts 레포 `supabase/nomad-cutover/`(01 freeze·undo·queue_check, 02 copy, 03 storage, check.sh) · `docs/ops/NOMAD_DB_CUTOVER.md`. 검증: `bash supabase/nomad-cutover/check.sh`.
+
+| 원본 | 대상 | 규칙 |
+|---|---|---|
+| 1절 표 31개(public 27 + private 4: channel_quotas·click_salts·metrics_runs·rate_counters) | 같은 이름 nomad_shorts·nomad_shorts_private | 열 그대로. 소유 `user_id` 9개 표는 `organization_id` = 그 사용자의 개인 조직(kind='personal', created_by, owner 멤버십). id·created_at·updated_at·번호·상태 원본 유지(replica 모드) |
+| user_profiles.name | nomad_core.profiles.display_name | upsert. 이름이 비어 있으면 백필 값 유지 |
+| user_profiles 기본값 열 6개 | nomad_shorts.user_settings | user_id 그대로, updated_at = 복사 시각 |
+| 저장 경로 4열(sources.file_path·thumbnail_path, voice_takes.audio_path, renders.mp4_path) | 같은 열 | `<user_id>/<project_id>/…` → `<organization_id>/<project_id>/…`. 형식이 다르면 중단 |
+| 버킷 sources·voices·renders·thumbnails 객체 | shorts-* (4절) | 03_storage.mjs 서버 측 copy, 같은 경로 규칙, 개수·크기 대조. 옛 버킷 유지 |
+| 시퀀스 metrics_runs_id_seq | nomad_shorts_private 같은 이름 | max(id)와 원본 위치 중 큰 값 |
+
+- **플랜 대응표**: 옛 스키마에 플랜 열이 없다 → 대응할 값 없음, `nomad_core.subscriptions` 행을 만들지 않는다(구독 없는 조직 = C 플랜, default_plan).
+- **중단 규칙**(02 시작 검사, 하나라도 있으면 변경 없이 중단): 새 표가 비어 있지 않음(재실행 방지) · 옛 pgmq 큐에 메시지 있음(사용자 결정 3) · 익명 사용자 소유 행(건수만 보고, 사용자 결정 2) · 개인 조직 없는 사용자 소유 행 · 경로 형식 불일치.
+- **끝 검사**: 표마다 행 수 + 전체 값(대응 규칙 적용) 양방향 대조, FK 고아 행(복합 FK 포함), 소유 조직 일치(chat_proposals·credit_ledger↔project, jobs 확장↔project, channel_slot_events↔account, bio_items↔page·link), 새 경로 형식.
+- **옮기지 않음**: user_profiles.email(정본 auth.users.email), 옛 pgmq 메시지, 옛 cron(새 이름으로 마이그레이션이 만든다), jsonb 안 값(jobs.payload 등).
+- **freeze 범위**: 옛 public·private 표의 insert·update·delete·truncate와 옛 public RPC(nomad_* 제외) execute를 PUBLIC·anon·authenticated·service_role에서 회수. worker_role은 큐를 비우도록 남긴다. 옛 가입 트리거는 auth.users 소유자가 아니면 disable할 수 없어 트리거 함수 본문을 무력화한다(undo가 원래 정의 복원).
+- **앱 계약**: 옛 행과 새 행이 같은 Vault 비밀(accounts.oauth_token_ref·api_keys.secret_ref)을 가리킨다. 옛 표를 정리할 때는 옛 vault_cleanup 트리거를 먼저 없앤다.
