@@ -5,7 +5,8 @@
 #   --dry-run   지울 대상·행 수를 보이고, 삭제 SQL을 트랜잭션 안에서 실행한 뒤 되돌린다(확인 질문 없음, 변경 없음).
 #   psql 대신 다른 실행기를 쓰려면 PSQL 환경 변수(예: PSQL="docker exec -i <컨테이너> psql -U postgres").
 # 지우는 것(모두 한 트랜잭션):
-#   1) 스키마 — 이름이 청사진과 정확히 같고, 그 안의 표 목록이 청사진의 표 목록과 정확히 같을 때만 drop schema … cascade.
+#   1) 스키마 — 적용 기록(supabase_migrations.schema_migrations)에 옛 청사진 버전이 있고 같은 제품 이식본(<slug>_0NNN_*)은 없으며,
+#      이름이 청사진과 정확히 같고 그 안의 표 목록이 청사진의 표 목록과 정확히 같을 때만 drop schema … cascade. 기록 표가 없으면 건너뛴다.
 #      표가 하나라도 다르면(같은 이름의 products/ 이식본일 수 있음) 건드리지 않는다.
 #   2) 1)을 지운 제품의 옛 기능 행 — 청사진이 시드한 nomad_core.features 중 products/<slug>/ 이식본 SQL이 이름으로 쓰지 않는 것과
 #      그 plan_features. 단품(addon_products·feature_grants)이 참조하는 기능은 남긴다. plans·products·구독은 건드리지 않는다.
@@ -59,6 +60,13 @@ for s in "${SLUGS[@]}"; do
   want="$(legacy_tables "$s" "$sch")"
   exists="$(q "select count(*) from pg_namespace where nspname = '$sch'")"
   [[ "$exists" == 1 ]] || continue
+  # 표 이름만으로는 이식본(같은 표 이름)과 구별되지 않는다 → 적용 기록으로 판별: 옛 청사진 버전이 적용됐고 같은 제품 이식본(*_<slug>_0NNN_*)은 적용된 적 없을 때만.
+  vers="$(legacy_files "$s" | sed -E 's|.*/([0-9]{14})_.*|'"'"'\1'"'"'|' | paste -sd, -)"
+  hist="$(q "select case when to_regclass('supabase_migrations.schema_migrations') is null then 'none' else (select (exists (select 1 from supabase_migrations.schema_migrations where version in ($vers)))::text || ',' || (exists (select 1 from supabase_migrations.schema_migrations where name like '${s}\\_0%'))::text) end")"
+  if [[ "$hist" != "true,false" ]]; then
+    echo "- $sch: 적용 기록으로 옛 청사진임을 확인할 수 없어 건너뜀(기록=$hist, 이식본 적용됐거나 기록 없음)"
+    continue
+  fi
   got="$(q "select coalesce(string_agg(tablename, ',' order by tablename), '') from pg_tables where schemaname = '$sch'")"
   if [[ "$got" != "$want" ]]; then
     echo "- $sch: 표 목록이 청사진과 달라 건너뜀(이식본일 수 있음). 청사진[$want] 대상[$got]"
