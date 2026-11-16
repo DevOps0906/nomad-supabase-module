@@ -123,3 +123,28 @@ begin
   if not nomad_lottolab.waitlist_confirm(h) then raise exception 'confirm'; end if;
 end;
 $$;
+
+-- 동의 이력 보관(2026-11-16 결정): 계정 삭제 뒤에도 행 유지(다른 개인 데이터는 CASCADE), 다른 사용자는 못 읽음
+reset role;
+delete from auth.users where id = '00000000-0000-4000-8000-0000000000a1';
+do $$
+begin
+  if (select count(*) from nomad_lottolab.user_consents where user_id = '00000000-0000-4000-8000-0000000000a1') <> 1 then
+    raise exception 'consent deleted with account';
+  end if;
+  if exists (select 1 from nomad_lottolab.fortune_profiles where user_id = '00000000-0000-4000-8000-0000000000a1')
+     or exists (select 1 from nomad_lottolab.saved_tickets where user_id = '00000000-0000-4000-8000-0000000000a1') then
+    raise exception 'personal data not cascaded';
+  end if;
+end;
+$$;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a2', true);
+do $$
+begin
+  if exists (select 1 from nomad_lottolab.user_consents where user_id = '00000000-0000-4000-8000-0000000000a1') then
+    raise exception 'other user reads retained consent';
+  end if;
+end;
+$$;
+reset role;

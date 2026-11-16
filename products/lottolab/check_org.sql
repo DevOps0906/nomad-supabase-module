@@ -250,7 +250,7 @@ set local role service_role;
 do $$
 declare r jsonb := nomad_lottolab.purge_personal_org_data('00000000-0000-4000-8000-0000000000a2');
 begin
-  if r <> '{"organizations": 2, "saved_tickets": 1, "generated_batches": 1, "generator_profiles": 1, "fortune_profiles": 1, "user_consents": 1}'::jsonb then
+  if r <> '{"organizations": 2, "saved_tickets": 1, "generated_batches": 1, "generator_profiles": 1, "fortune_profiles": 1}'::jsonb then
     raise exception 'purge result %', r;
   end if;
 end;
@@ -277,8 +277,40 @@ begin
     raise exception 'purge audit contains personal data';
   end if;
   if (select metadata from nomad_core.audit_log where action = 'lottolab.personal_org_purged' and organization_id = '00000000-0000-4000-8000-0000000000c7')
-     <> '{"saved_tickets": 1, "generated_batches": 1, "generator_profiles": 1, "fortune_profiles": 1, "user_consents": 1}'::jsonb then
+     <> '{"saved_tickets": 1, "generated_batches": 1, "generator_profiles": 1, "fortune_profiles": 1}'::jsonb then
     raise exception 'purge audit counts';
   end if;
 end;
 $$;
+
+-- 동의 이력 보관(2026-11-16 결정): purge·계정 삭제 뒤에도 행 유지, 다른 사용자는 못 읽음
+do $$
+begin
+  if (select count(*) from nomad_lottolab.user_consents where user_id = '00000000-0000-4000-8000-0000000000a2' and organization_id = '00000000-0000-4000-8000-0000000000c7') <> 1 then
+    raise exception 'consent purged';
+  end if;
+end;
+$$;
+delete from auth.users where id = '00000000-0000-4000-8000-0000000000a2';
+do $$
+begin
+  if (select count(*) from nomad_lottolab.user_consents where user_id = '00000000-0000-4000-8000-0000000000a2') < 1 then
+    raise exception 'consent deleted with account';
+  end if;
+  if exists (select 1 from nomad_lottolab.fortune_profiles where user_id = '00000000-0000-4000-8000-0000000000a2') then
+    raise exception 'fortune not cascaded';
+  end if;
+end;
+$$;
+-- 조직 삭제는 동의 이력이 있으면 거부(on delete restrict)
+select pg_temp.expect_fail($q$delete from nomad_core.organizations where id = '00000000-0000-4000-8000-0000000000c7'$q$, 'org delete with consents');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000a1', true);
+do $$
+begin
+  if exists (select 1 from nomad_lottolab.user_consents where user_id = '00000000-0000-4000-8000-0000000000a2') then
+    raise exception 'other user reads retained consent';
+  end if;
+end;
+$$;
+reset role;

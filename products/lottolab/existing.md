@@ -17,7 +17,7 @@
 | saved_tickets | 이관 | nomad_lottolab.saved_tickets | 모바일 | user_id → organization_id, 멱등 키 unique (org, key) |
 | draw_checks | 이관(쓰기 service_role) | nomad_lottolab.draw_checks | 서버 판정 | ticket 경유 |
 | fortune_profiles | 이관 | nomad_lottolab.fortune_profiles | 모바일 `.from("fortune_profiles")` | user안 PK user_id. org안 PK (organization_id, user_id): 조직 안에서도 본인만 CRUD(owner·admin도 못 봄). 앱 upsert 충돌 키 `organization_id,user_id`, user_id는 기본값 auth.uid() |
-| user_consents | 이관(추가 전용) | nomad_lottolab.user_consents | 모바일 `.from("user_consents")` | organization_id 추가, user_id는 동의한 사람(행위자)으로 유지 |
+| user_consents | 이관(추가 전용) | nomad_lottolab.user_consents | 모바일 `.from("user_consents")` | organization_id 추가(on delete restrict), user_id는 동의한 사람(행위자)으로 유지. user_id는 auth.users FK 없음 → 계정 삭제 뒤에도 보관(아래 "동의 이력 보관") |
 | push_devices (문서만) | 신규(app/) | nomad_lottolab.push_devices | 모바일·데스크톱 알림 | user_id 유지(기기는 사람 소속) |
 | subscription_accounts (문서만, P2) | 신규(app/) | nomad_lottolab.subscription_accounts | 스토어 영수증 검증 | user_id 유지. state 값은 Q3 후 확정, 팀 결제는 nomad_core.subscriptions |
 | profiles·조직·멤버십·플랜 | 대체 | nomad_core.profiles·organizations·memberships·plans | — | (레포에 없음, 신규 생성 금지) |
@@ -35,7 +35,7 @@ generator_profiles · saved_tickets · fortune_profiles: `updated_at not null de
 | private.saved_tickets_guard_transition · _check_source | 이관(내부 트리거) | nomad_lottolab_private.* | saved_tickets |
 | private.fortune_profiles_set_updated_at | 삭제 | nomad_core.touch_updated_at 로 대체 | — |
 | pg_cron: waitlist_purge_6m · rate_limits_purge · waitlist_purge_unconfirmed | 이관(pg_cron 있을 때만 등록) | 같은 이름 | 서버 |
-| EF account-delete | 레포 유지 | auth 사용자 삭제 → user안은 CASCADE 파기, org안은 삭제 **전에** `rpc('purge_personal_org_data', {p_user_id})`(결정 8) | 모바일 |
+| EF account-delete | 레포 유지 | auth 사용자 삭제 → user안은 CASCADE 파기(user_consents 제외·보관), org안은 삭제 **전에** `rpc('purge_personal_org_data', {p_user_id})`(결정 8) | 모바일 |
 | (신규, 2026-11-16 결정 8) purge_personal_org_data(user) | 신규(service_role만) | nomad_lottolab.purge_personal_org_data | EF account-delete |
 
 - EF의 `/rest/v1/rpc/…`·`/rest/v1/waitlist_signups` 호출은 `Content-Profile`/`Accept-Profile: nomad_lottolab` 헤더와 API 노출 스키마 설정이 필요하다(레포 수정은 이 작업 범위 밖, 팀장 확인).
@@ -45,5 +45,12 @@ generator_profiles · saved_tickets · fortune_profiles: `updated_at not null de
 ## EF account-delete 계약 (org안, 2026-11-16 결정 8)
 1. EF(service_role)가 **auth 사용자 삭제 전에** `nomad_lottolab.purge_personal_org_data(p_user_id)`를 부른다. 삭제 뒤에는 멤버십이 사라져 대상 조직을 찾을 수 없다.
 2. 대상: `kind='personal'`이고 멤버가 그 사용자 1명뿐인 조직. 다른 사람이 함께 있는 조직·팀 조직은 건드리지 않는다.
-3. 조직 행은 남긴다(결제 원장·다른 제품 데이터 보존). nomad_lottolab 행(saved_tickets→draw_checks, generated_batches→generated_numbers, generator_profiles, fortune_profiles, user_consents)만 지운다. 반환 jsonb에 조직 수·표별 행 수.
-4. 그다음 auth 사용자를 삭제한다(fortune_profiles·user_consents·push_devices·subscription_accounts는 user_id CASCADE로도 지워진다). RPC가 실패하면 사용자 삭제를 하지 않고 재시도한다.
+3. 조직 행은 남긴다(결제 원장·다른 제품 데이터 보존). nomad_lottolab 행(saved_tickets→draw_checks, generated_batches→generated_numbers, generator_profiles, fortune_profiles)만 지운다. user_consents는 지우지 않는다(동의 이력 보관). 반환 jsonb에 조직 수·표별 행 수.
+4. 그다음 auth 사용자를 삭제한다(fortune_profiles·push_devices·subscription_accounts는 user_id CASCADE로도 지워진다. user_consents는 FK가 없어 남는다). RPC가 실패하면 사용자 삭제를 하지 않고 재시도한다.
+
+## 동의 이력 보관 (2026-11-16 사용자 결정)
+- 결정: 계정 삭제(탈퇴) 뒤에도 `user_consents`(약관·개인정보·만 19세 동의 기록)를 보관한다. user·org안 모두 `user_id`는 auth.users FK 없이 uuid 값만 남고, org안 `purge_personal_org_data`도 동의 행을 지우지 않는다(반환·감사 건수에서 `user_consents` 키 제거).
+- org안 `organization_id`는 `on delete restrict`: 조직 행은 남기는 정책이고(nomad_core 원장도 조직 삭제를 막음), 조직 삭제로 동의 이력이 함께 사라지지 않게 한다.
+- 접근: RLS·grant 변경 없음. 본인(`auth.uid() = user_id`)만 SELECT, UPDATE·DELETE 권한 없음, service_role도 접근 없음 → 탈퇴 후 앱에서는 아무도 읽지 못한다(만료 전 기존 JWT는 서명만 검증되므로 만료까지 본인 행을 읽을 수 있음). 열람·파기는 DB 관리자(postgres)만.
+- **보관 기간: 미정(법무 확인 필요)**. 기간이 정해지면 파기 작업(예: 탈퇴 후 N년 지난 행 삭제, pg_cron)을 별도 작업으로 추가한다.
+- 검사: `check_user.sql`·`check_org.sql` 끝부분(계정 삭제·purge 뒤 행 유지, 다른 사용자 못 읽음, 동의 있는 조직 삭제 거부).

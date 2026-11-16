@@ -624,8 +624,8 @@ create trigger fortune_profiles_touch_updated_at
 
 create table nomad_lottolab.user_consents (
   id               uuid        primary key default gen_random_uuid(),
-  organization_id  uuid        not null references nomad_core.organizations (id) on delete cascade,
-  user_id          uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  organization_id  uuid        not null references nomad_core.organizations (id) on delete restrict,
+  user_id          uuid        not null default auth.uid(),  -- FK 없음: 계정 삭제 뒤에도 동의 이력 보관(2026-11-16 결정, 보관 기간은 법무 확인 전 미정)
   terms_version    text        not null,
   privacy_version  text        not null,
   adult_confirmed  boolean     not null,
@@ -634,7 +634,7 @@ create table nomad_lottolab.user_consents (
   constraint user_consents_terms_version_chk check (char_length(terms_version) between 1 and 32),
   constraint user_consents_privacy_version_chk check (char_length(privacy_version) between 1 and 32)
 );
-comment on table nomad_lottolab.user_consents is '가입 동의 기록(약관·개인정보·만 19세). 동의한 본인(user_id)만 SELECT/INSERT(추가 전용), consented_at은 서버 시각.';
+comment on table nomad_lottolab.user_consents is '가입 동의 기록(약관·개인정보·만 19세). 동의한 본인(user_id)만 SELECT/INSERT(추가 전용), consented_at은 서버 시각. 계정 삭제·개인 조직 정리 뒤에도 보관(user_id는 FK 없는 값).';
 create index user_consents_org_idx on nomad_lottolab.user_consents (organization_id, consented_at desc);
 alter table nomad_lottolab.user_consents enable row level security;
 revoke all on table nomad_lottolab.user_consents from anon, authenticated, public, service_role;
@@ -651,14 +651,15 @@ create policy user_consents_insert_own on nomad_lottolab.user_consents
 -- EF account-delete가 auth 사용자 삭제 **전에** 부른다(삭제 뒤에는 멤버십이 사라져 대상을 찾을 수 없다).
 -- 대상 = kind='personal'이고 멤버가 그 사용자 1명뿐인 조직. 조직 자체(결제 원장·다른 제품 데이터)는 남기고 nomad_lottolab 행만 지운다.
 -- generated_numbers는 batches, draw_checks는 saved_tickets 삭제에 따라 CASCADE. 반환: 정리한 조직 수·표별 삭제 행 수
+-- user_consents는 지우지 않는다(동의 이력 보관, 2026-11-16 결정).
 -- 감사: 조직마다 nomad_core.write_audit(조직, 'lottolab.personal_org_purged', 대상 조직 id, metadata = 표별 삭제 건수). 개인정보(사용자 id 등)는 넣지 않는다.
 create function nomad_lottolab.purge_personal_org_data(p_user_id uuid) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
   v_orgs uuid[]; v_org uuid; v_counts jsonb;
-  n_tickets int := 0; n_batches int := 0; n_profiles int := 0; n_fortune int := 0; n_consents int := 0;
-  c_tickets int; c_batches int; c_profiles int; c_fortune int; c_consents int;
+  n_tickets int := 0; n_batches int := 0; n_profiles int := 0; n_fortune int := 0;
+  c_tickets int; c_batches int; c_profiles int; c_fortune int;
 begin
   if p_user_id is null then
     raise exception 'purge_personal_org_data: user required' using errcode = '22023';
@@ -677,16 +678,14 @@ begin
     get diagnostics c_profiles = row_count;
     delete from nomad_lottolab.fortune_profiles where organization_id = v_org;
     get diagnostics c_fortune = row_count;
-    delete from nomad_lottolab.user_consents where organization_id = v_org;
-    get diagnostics c_consents = row_count;
     v_counts := jsonb_build_object('saved_tickets', c_tickets, 'generated_batches', c_batches,
-                                   'generator_profiles', c_profiles, 'fortune_profiles', c_fortune, 'user_consents', c_consents);
+                                   'generator_profiles', c_profiles, 'fortune_profiles', c_fortune);
     perform nomad_core.write_audit(v_org, 'lottolab.personal_org_purged', 'organization', v_org::text, null, null, v_counts);
     n_tickets := n_tickets + c_tickets; n_batches := n_batches + c_batches; n_profiles := n_profiles + c_profiles;
-    n_fortune := n_fortune + c_fortune; n_consents := n_consents + c_consents;
+    n_fortune := n_fortune + c_fortune;
   end loop;
   return jsonb_build_object('organizations', cardinality(v_orgs), 'saved_tickets', n_tickets, 'generated_batches', n_batches,
-                            'generator_profiles', n_profiles, 'fortune_profiles', n_fortune, 'user_consents', n_consents);
+                            'generator_profiles', n_profiles, 'fortune_profiles', n_fortune);
 end;
 $$;
 revoke execute on function nomad_lottolab.purge_personal_org_data(uuid) from public, anon, authenticated;
