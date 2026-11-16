@@ -313,5 +313,84 @@ insert into nomad_knowflow.conversations (project_id, user_id) select v, 'aaaaaa
 select public.t_eq((select count(*) from nomad_knowflow.conversations where user_id = 'aaaaaaaa-0000-0000-0000-00000000000a'), 2, '구독 팀 조직 owner(A)는 열림');
 reset role;
 
+-- ===== 0003: 영상 요약 격리·권한 + 권리자 삭제(takedown) 뒤 재저장 거부 =====
+-- 자료 3개: ta(A, 영상 tkdnvideo01) · tb(B, 같은 영상) · tc(A, 다른 영상 othervideo1). 자료마다 running 작업 jr_* · succeeded 작업 jd_*
+reset role;
+insert into t_ids (k, v) select k, gen_random_uuid() from unnest(array['ta', 'tb', 'tc', 'jr_ta', 'jr_tb', 'jr_tc', 'jd_ta', 'jd_tb', 'jd_tc']) k;
+insert into nomad_knowflow.sources (id, project_id, user_id, source_type, title, original_url, video_id, duration_seconds, status)
+select (select v from t_ids where k = x.k), (select v from t_ids where k = x.pk), x.o::uuid, 'youtube', '영상 ' || x.k,
+       'https://www.youtube.com/watch?v=' || x.vid, x.vid, 100, 'processing'
+  from (values ('ta', 'pa', 'aaaaaaaa-0000-0000-0000-00000000000a', 'tkdnvideo01'), ('tb', 'pb', 'bbbbbbbb-0000-0000-0000-00000000000b', 'tkdnvideo01'), ('tc', 'pa', 'aaaaaaaa-0000-0000-0000-00000000000a', 'othervideo1')) x(k, pk, o, vid);
+insert into nomad_knowflow.processing_jobs (id, user_id, source_id, job_type, status, attempt_count, started_at)
+select (select v from t_ids where k = 'jr_' || s.title_k), s.user_id, s.id, 'source_ingest', 'running', 1, now()
+  from (select substr(title, 4) as title_k, * from nomad_knowflow.sources where id in (select v from t_ids where k in ('ta', 'tb', 'tc'))) s;
+insert into nomad_knowflow.processing_jobs (id, user_id, source_id, job_type, status, progress, attempt_count, started_at, finished_at)
+select (select v from t_ids where k = 'jd_' || s.title_k), s.user_id, s.id, 'source_ingest', 'succeeded', 100, 1, now(), now()
+  from (select substr(title, 4) as title_k, * from nomad_knowflow.sources where id in (select v from t_ids where k in ('ta', 'tb', 'tc'))) s;
+create temp table t_kf3 (k text primary key, ok boolean);
+grant all on t_kf3 to public;
+select public.t_role('service_role');
+insert into t_kf3 select 'chunks_' || x.k, nomad_knowflow.replace_source_chunks((select v from t_ids where k = 'jr_' || x.k), 1,
+  '[{"chunk_index":0,"content":"청크 0","locator":{"t_start":0}},{"chunk_index":1,"content":"청크 1","locator":{"t_start":10}}]'::jsonb)
+  from (values ('ta'), ('tb'), ('tc')) x(k);
+insert into t_kf3 select 'moments_' || x.k, nomad_knowflow.replace_source_moments((select v from t_ids where k = 'jr_' || x.k), 1,
+  '[{"moment_index":0,"locator":{"t_start":0,"t_end":10},"title":"장면","description":"설명"}]'::jsonb)
+  from (values ('ta'), ('tb'), ('tc')) x(k);
+insert into t_kf3 select 'summary_' || x.k, nomad_knowflow.save_source_summary((select v from t_ids where k = 'jd_' || x.k),
+  jsonb_build_array(jsonb_build_object('text', '요약 문장', 'chunk_ids',
+    (select jsonb_agg(c.id::text) from nomad_knowflow.source_chunks c where c.source_id = (select v from t_ids where k = x.k)))), 'test-model')
+  from (values ('ta'), ('tb'), ('tc')) x(k);
+select public.t_eq((select count(*) from t_kf3 where ok), 9, '0003 준비: 청크·장면·요약 저장 9건');
+reset role;
+
+-- 요약 격리: 자기 요약만
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 2, 'A는 자기 요약 2건만');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries where source_id = (select v from t_ids where k = 'tb')), 0, 'A는 B 요약 안 보임');
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 1, 'B는 자기 요약 1건만');
+-- service_role 외 실행·직접 쓰기 거부
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.save_source_summary(%L, '[{"text":"x","chunk_ids":[]}]', 'm')$q$, (select v from t_ids where k = 'jd_ta')), '42501');
+select public.t_expect($q$select nomad_knowflow.takedown_video('tkdnvideo01', '사유')$q$, '42501');
+select public.t_expect(format($q$select nomad_knowflow.replace_source_moments(%L, 1, '[]')$q$, (select v from t_ids where k = 'jr_ta')), '42501');
+select public.t_expect(format($q$update nomad_knowflow.source_summaries set model = 'x' where source_id = %L$q$, (select v from t_ids where k = 'ta')), '42501');
+select public.t_expect(format($q$delete from nomad_knowflow.source_summaries where source_id = %L$q$, (select v from t_ids where k = 'ta')), '42501');
+select public.t_role('anon');
+select public.t_expect($q$select nomad_knowflow.takedown_video('tkdnvideo01', '사유')$q$, '42501');
+select public.t_expect($q$select * from nomad_knowflow.source_summaries$q$, '42501');
+
+-- takedown: 같은 영상의 모든 자료 비활성 + 청크·장면·요약 삭제, 진행 중 작업 수 반환
+select public.t_role('service_role');
+select public.t_expect($q$select nomad_knowflow.takedown_video('bad', '사유')$q$, '22023');
+select public.t_expect($q$select nomad_knowflow.takedown_video('tkdnvideo01', '  ')$q$, '22023');
+delete from t_job;
+insert into t_job select nomad_knowflow.takedown_video('tkdnvideo01', '권리자 요청(합성)');
+select public.t_eq((select (j ->> 'sources')::int from t_job), 2, 'takedown 자료 2건(A·B)');
+select public.t_eq((select (j ->> 'chunks_deleted')::int from t_job), 4, 'takedown 청크 4건 삭제');
+select public.t_eq((select (j ->> 'moments_deleted')::int from t_job), 2, 'takedown 장면 2건 삭제');
+select public.t_eq((select (j ->> 'summaries_deleted')::int from t_job), 2, 'takedown 요약 2건 삭제');
+select public.t_eq((select (j ->> 'active_jobs')::int from t_job), 2, 'takedown 진행 중 작업 2건');
+-- takedown 뒤 진행 중 작업의 재저장 거부(false, 아무것도 안 바뀜)
+select public.t_eq((select count(*) from nomad_knowflow.replace_source_chunks((select v from t_ids where k = 'jr_ta'), 1,
+  '[{"chunk_index":0,"content":"되살림","locator":{}}]'::jsonb) r where not r), 1, 'takedown 뒤 replace_source_chunks 거부');
+select public.t_eq((select count(*) from nomad_knowflow.replace_source_moments((select v from t_ids where k = 'jr_ta'), 1,
+  '[{"moment_index":0,"locator":{"t_start":0,"t_end":10},"title":"장면","description":"설명"}]'::jsonb) r where not r), 1, 'takedown 뒤 replace_source_moments 거부');
+select public.t_eq((select count(*) from nomad_knowflow.save_source_summary((select v from t_ids where k = 'jd_tb'),
+  '[{"text":"되살림","chunk_ids":["00000000-0000-0000-0000-000000000000"]}]'::jsonb, 'm') r where not r), 1, 'takedown 뒤 save_source_summary 거부');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow.source_chunks where source_id in (select v from t_ids where k in ('ta', 'tb'))), 0, 'takedown 자료 청크 0');
+select public.t_eq((select count(*) from nomad_knowflow.source_moments where source_id in (select v from t_ids where k in ('ta', 'tb'))), 0, 'takedown 자료 장면 0');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries where source_id in (select v from t_ids where k in ('ta', 'tb'))), 0, 'takedown 자료 요약 0');
+-- 다른 영상(tc)은 영향 없음
+select public.t_eq((select count(*) from nomad_knowflow.sources where id = (select v from t_ids where k = 'tc') and unavailable_at is null), 1, '다른 영상 자료 활성 유지');
+select public.t_eq((select count(*) from nomad_knowflow.source_chunks where source_id = (select v from t_ids where k = 'tc')), 2, '다른 영상 청크 유지');
+select public.t_eq((select count(*) from nomad_knowflow.source_moments where source_id = (select v from t_ids where k = 'tc')), 1, '다른 영상 장면 유지');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries where source_id = (select v from t_ids where k = 'tc')), 1, '다른 영상 요약 유지');
+select public.t_eq((select count(*) from nomad_core.audit_log where action = 'knowflow.rights_takedown' and target_id = 'tkdnvideo01'), 1, 'takedown 감사 기록 1건');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select count(*) from nomad_knowflow.source_summaries), 1, 'takedown 뒤 A 요약은 다른 영상 1건');
+reset role;
+
 select 'USER CHECK PASSED' as result;
 rollback;

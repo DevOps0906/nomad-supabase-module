@@ -264,5 +264,21 @@ begin
   end if;
   if not exists (select 1 from nomad_core.organizations where id = '00000000-0000-4000-8000-0000000000c7') then raise exception 'organization itself was deleted'; end if;
   if not exists (select 1 from nomad_core.memberships where organization_id = '00000000-0000-4000-8000-0000000000c7') then raise exception 'membership was deleted'; end if;
+  -- 다른 멤버가 있는 개인 조직(c8)·팀 조직(bb)은 데이터·감사 기록 모두 없음
+  if (select count(*) from nomad_lottolab.generator_profiles where organization_id = '00000000-0000-4000-8000-0000000000c8') <> 1 then raise exception 'shared personal org purged'; end if;
+  if (select count(*) from nomad_lottolab.generator_profiles where organization_id = '00000000-0000-4000-8000-0000000000bb') <> 1 then raise exception 'team org purged'; end if;
+  -- 감사: 정리한 조직마다 1건(조직 id·건수만, 사용자 id 없음)
+  if (select count(*) from nomad_core.audit_log where action = 'lottolab.personal_org_purged') <> 2 then raise exception 'purge audit count'; end if;
+  if exists (select 1 from nomad_core.audit_log where action = 'lottolab.personal_org_purged'
+              and (organization_id in ('00000000-0000-4000-8000-0000000000c8', '00000000-0000-4000-8000-0000000000bb')
+                   or target_id <> organization_id::text)) then raise exception 'purge audit wrong org'; end if;
+  if exists (select 1 from nomad_core.audit_log where action = 'lottolab.personal_org_purged'
+              and (metadata::text like '%00000000-0000-4000-8000-0000000000a2%' or before is not null or after is not null)) then
+    raise exception 'purge audit contains personal data';
+  end if;
+  if (select metadata from nomad_core.audit_log where action = 'lottolab.personal_org_purged' and organization_id = '00000000-0000-4000-8000-0000000000c7')
+     <> '{"saved_tickets": 1, "generated_batches": 1, "generator_profiles": 1, "fortune_profiles": 1, "user_consents": 1}'::jsonb then
+    raise exception 'purge audit counts';
+  end if;
 end;
 $$;

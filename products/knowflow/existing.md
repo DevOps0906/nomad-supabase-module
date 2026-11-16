@@ -23,6 +23,7 @@
 | usage_events | 이관(원 단위 정수) | nomad_knowflow.usage_events | 워커 insert · 웹 읽기 | user_id(null 허용) → organization_id(null 허용) |
 | idempotency_keys | 이관(내부) | nomad_knowflow_private.idempotency_keys | RPC 내부 | PK (user_id,key) → (organization_id,key) |
 | auth_rate_limits | 이관(내부) | nomad_knowflow_private.auth_rate_limits | RPC 내부 | 비식별 키(소유 컬럼 없음) |
+| (task-029 초안) source_summaries | 이관(`0003_youtube_summary_takedown.sql`) | nomad_knowflow.source_summaries | 워커 RPC 쓰기(save_source_summary) · 웹 읽기 | user_id → organization_id |
 - 동기화 대상 4개(projects·sources·conversations·reports): `updated_at`·`deleted_at`·`nomad_core.touch_updated_at()` 트리거·`(소유 컬럼, updated_at)` 인덱스(`*_user_sync_idx`/`*_org_sync_idx`). conversations·reports는 `deleted_at`을 새로 추가했다(원본에는 없음). RLS는 `deleted_at is null`만 보여 주고, 삭제 전파는 서버/RPC(service_role)가 `deleted_at > 마지막 동기 시각`으로 조회한다.
 
 ## plan_limits 키 (수치 시드 안 함 — 원본 beta 값은 참고용, 설정은 코어 시드가 정한다)
@@ -94,6 +95,14 @@
 - 앱 계약 변경: 웹은 질문 저장 `.from('messages').insert` → `rpc('ask_question')`, 보고서 생성 `.from('reports').insert`(+잡 insert) → `rpc('create_report')`, 같은 요청 재시도에 같은 멱등 키. 서버는 답변 저장을 `rpc('save_answer', {p_question_id})`로, 답변 생성 실패는 `rpc('refund_question_quota', {p_question_id})`로(답변을 저장했으면 부르지 않는다). 워커는 report_generate 잡 실패를 `fail_job`으로 보고(환불·failed 처리는 DB). KF429 HINT `questions`·`reports`는 한도 초과 안내.
 - 이관 절차: 기존 messages·reports 복사는 postgres 세션에서 한다(service_role insert 불가).
 - 앱 영향: 웹·서버는 KF403을 "플랜에서 잠긴 기능"으로 처리(업그레이드 안내, HINT로 기능 구분). 서버가 대화·메시지를 직접 insert할 때도 KF403이 난다(유튜브 등록 전 서버의 "기능 플래그 확인"은 DB가 다시 강제). 워커 변경 없음.
+
+## 영상 요약·권리자 삭제 (`0003_youtube_summary_takedown.sql`, KNOWFLOW-AI task-029)
+| 경로 | 순서 | 오류 |
+|---|---|---|
+| save_source_summary (service_role) | 작업(최신 succeeded source_ingest) → 자료 잠금(미삭제·`unavailable_at is null`) → 인용 청크가 모두 그 자료 것 → upsert | 형식 22023 · 조건 불일치 false |
+| replace_source_chunks · replace_source_moments (0003에서 재정의, service_role) | 작업 펜싱(running·attempt) → 자료 잠금(미삭제·`unavailable_at is null`) → 통째 교체(청크 교체 시 요약도 삭제) | 비활성·삭제 자료는 false(아무것도 안 바꿈) — takedown 뒤 진행 중 작업이 되살리지 못함 |
+| takedown_video (service_role) | 해당 video_id 모든 자료 비활성 → 청크·장면·요약 삭제 → `nomad_core.write_audit` | 22023(video_id·사유). 반환 `active_jobs`가 0이 아니면 작업 종료 뒤 재실행 |
+- 검사: 요약 소유 격리·authenticated/anon 실행 거부·takedown 뒤 replace_*/save 거부·다른 video_id 자료 유지(check_user·check_org).
 
 ## 팀장 확인 필요
 1. user안의 한도 기준(플랜 C 행 고정)과 코어의 knowflow 플랜 C 시드 필요.

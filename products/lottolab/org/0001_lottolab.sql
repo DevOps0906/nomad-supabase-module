@@ -1,5 +1,5 @@
 -- LOTTO-LAB org안(테넌트형): 소유 organization_id → nomad_core.organizations, RLS organization_role(...). 공개 추첨 데이터는 anon 읽기.
--- 근거: tasks/task-012-product-ports.md, docs/design/04-products/survey-lotto-lab.md. 전제: nomad_core.touch_updated_at() 존재.
+-- 근거: tasks/task-012-product-ports.md, docs/design/04-products/survey-lotto-lab.md. 전제: nomad_core.touch_updated_at()·nomad_core.write_audit() 존재.
 begin;
 
 create schema nomad_lottolab;
@@ -651,12 +651,14 @@ create policy user_consents_insert_own on nomad_lottolab.user_consents
 -- EF account-delete가 auth 사용자 삭제 **전에** 부른다(삭제 뒤에는 멤버십이 사라져 대상을 찾을 수 없다).
 -- 대상 = kind='personal'이고 멤버가 그 사용자 1명뿐인 조직. 조직 자체(결제 원장·다른 제품 데이터)는 남기고 nomad_lottolab 행만 지운다.
 -- generated_numbers는 batches, draw_checks는 saved_tickets 삭제에 따라 CASCADE. 반환: 정리한 조직 수·표별 삭제 행 수
+-- 감사: 조직마다 nomad_core.write_audit(조직, 'lottolab.personal_org_purged', 대상 조직 id, metadata = 표별 삭제 건수). 개인정보(사용자 id 등)는 넣지 않는다.
 create function nomad_lottolab.purge_personal_org_data(p_user_id uuid) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_orgs uuid[];
-  n_tickets int; n_batches int; n_profiles int; n_fortune int; n_consents int;
+  v_orgs uuid[]; v_org uuid; v_counts jsonb;
+  n_tickets int := 0; n_batches int := 0; n_profiles int := 0; n_fortune int := 0; n_consents int := 0;
+  c_tickets int; c_batches int; c_profiles int; c_fortune int; c_consents int;
 begin
   if p_user_id is null then
     raise exception 'purge_personal_org_data: user required' using errcode = '22023';
@@ -666,16 +668,23 @@ begin
    where o.kind = 'personal'
      and exists (select 1 from nomad_core.memberships m where m.organization_id = o.id and m.user_id = p_user_id)
      and not exists (select 1 from nomad_core.memberships m where m.organization_id = o.id and m.user_id <> p_user_id);
-  delete from nomad_lottolab.saved_tickets where organization_id = any (v_orgs);
-  get diagnostics n_tickets = row_count;
-  delete from nomad_lottolab.generated_batches where organization_id = any (v_orgs);
-  get diagnostics n_batches = row_count;
-  delete from nomad_lottolab.generator_profiles where organization_id = any (v_orgs);
-  get diagnostics n_profiles = row_count;
-  delete from nomad_lottolab.fortune_profiles where organization_id = any (v_orgs);
-  get diagnostics n_fortune = row_count;
-  delete from nomad_lottolab.user_consents where organization_id = any (v_orgs);
-  get diagnostics n_consents = row_count;
+  foreach v_org in array v_orgs loop
+    delete from nomad_lottolab.saved_tickets where organization_id = v_org;
+    get diagnostics c_tickets = row_count;
+    delete from nomad_lottolab.generated_batches where organization_id = v_org;
+    get diagnostics c_batches = row_count;
+    delete from nomad_lottolab.generator_profiles where organization_id = v_org;
+    get diagnostics c_profiles = row_count;
+    delete from nomad_lottolab.fortune_profiles where organization_id = v_org;
+    get diagnostics c_fortune = row_count;
+    delete from nomad_lottolab.user_consents where organization_id = v_org;
+    get diagnostics c_consents = row_count;
+    v_counts := jsonb_build_object('saved_tickets', c_tickets, 'generated_batches', c_batches,
+                                   'generator_profiles', c_profiles, 'fortune_profiles', c_fortune, 'user_consents', c_consents);
+    perform nomad_core.write_audit(v_org, 'lottolab.personal_org_purged', 'organization', v_org::text, null, null, v_counts);
+    n_tickets := n_tickets + c_tickets; n_batches := n_batches + c_batches; n_profiles := n_profiles + c_profiles;
+    n_fortune := n_fortune + c_fortune; n_consents := n_consents + c_consents;
+  end loop;
   return jsonb_build_object('organizations', cardinality(v_orgs), 'saved_tickets', n_tickets, 'generated_batches', n_batches,
                             'generator_profiles', n_profiles, 'fortune_profiles', n_fortune, 'user_consents', n_consents);
 end;
