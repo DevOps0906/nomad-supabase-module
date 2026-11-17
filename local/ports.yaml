@@ -1,0 +1,30 @@
+# 제품 slug -> 로컬 Supabase 포트 블록(10단위 시작 포트). 형식: `slug: base` 한 줄(주석 #).
+# 블록 규칙: +0 shadow · +1 api · +2 db · +3 studio · +4 mail · +9 pooler. 기존 값은 고정, 새 제품은 맨 아래에 순차 추가(겹침 금지).
+module: 58120
+knowflow: 56520
+analytics: 56530
+arch: 56540
+astro: 56550
+baedal: 56560
+blog: 56570
+classroom: 56580
+commerce: 56590
+contentflow: 56600
+erp: 56610
+flora: 56620
+floria: 56630
+hospital: 56640
+humscore: 56650
+jangter: 56660
+lottolab: 56670
+microweb: 56680
+news: 56690
+personal: 56700
+poll: 56710
+sceneflow: 56720
+school: 56730
+shorts: 56740
+stock: 56750
+studynote: 56760
+toon: 56770
+trailer: 56780

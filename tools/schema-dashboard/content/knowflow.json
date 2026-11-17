@@ -2,11 +2,11 @@
   "slug": "knowflow",
   "icon": "📚",
   "tagline": "자료를 모아 묻고 보고서를 만드는 지식 DB",
-  "overview": "프로젝트에 PDF·URL·유튜브 자료를 모으고, 워커가 청크·장면 카드로 쪼갠 뒤 대화(질문·답변)와 보고서를 만든다. 조직형(org)은 조직 멤버가 읽고 owner·admin·editor만 RPC로 쓰며, 사용자형(user)은 본인 소유만 다룬다. 사용자 롤은 SELECT만 있고 모든 쓰기는 SECURITY DEFINER RPC로만 하며, 질문·답변·보고서 생성은 서버(service_role)도 표에 직접 넣지 못한다. 한도는 nomad_core.plan_limits(knowflow)의 프로젝트 수·프로젝트당 자료 수·월 질문·보고서·자료 작업·영상 초로 막고(KF429), 기능 잠금은 knowledge_base·knowledge_chat·space_reports(KF403)다. 결제성 요청(자료 등록·질문·보고서)은 멱등 키로 중복 차감을 막는다.",
+  "overview": "프로젝트에 PDF·URL·유튜브 자료를 모으고, 워커가 청크·장면 카드로 쪼갠 뒤 대화(질문·답변)와 보고서를 만든다. 조직형(org)은 조직 멤버가 읽고 owner·admin·editor만 RPC로 쓰며, 사용자형(user)은 본인 소유만 다룬다. 사용자 롤은 SELECT만 있고 모든 쓰기는 SECURITY DEFINER RPC로만 하며, 질문·답변·보고서 생성은 서버(service_role)도 표에 직접 넣지 못한다. 한도는 nomad_core.plan_limits(knowflow)의 프로젝트 수·프로젝트당 자료 수·월 질문·보고서·자료 작업·영상 초로 막고(KF429), 기능 잠금은 knowledge_base·knowledge_chat·space_reports(KF403)다. 결제성 요청(자료 등록·질문·보고서)은 멱등 키로 중복 차감을 막는다. 0005부터 워커가 자료(유튜브·PDF)마다 다이제스트(source_digests)와 요약을 저장하고, 권리자 삭제(takedown_video)된 영상은 차단 목록에 남아 어느 소유자도 다시 등록하지 못한다(KF451).",
   "diagrams": [
     {
       "title": "주요 흐름",
-      "mermaid": "flowchart LR\n  U[사용자] --> CP[create_project]\n  U --> RP[register_pdf_source]\n  SV[서버] --> RY[register_youtube_source]\n  U --> AQ[ask_question]\n  SV --> SA[save_answer]\n  U --> CR[create_report]\n  CP --> PJ[(projects)]\n  RP --> SR[(sources)]\n  RY --> SR\n  RP --> JB[(processing_jobs)]\n  RY --> JB\n  CR --> RE[(reports)]\n  CR --> JB\n  AQ --> MS[(messages)]\n  SA --> MS\n  AQ --> QT[(quotas)]\n  CR --> QT\n  W[워커] --> CJ[claim_job]\n  CJ --> JB\n  W --> RC[replace_source_chunks]\n  RC --> CH[(source_chunks)]\n  W --> RM[replace_source_moments]\n  RM --> MO[(source_moments)]"
+      "mermaid": "flowchart LR\n  U[사용자] --> CP[create_project]\n  U --> RP[register_pdf_source]\n  SV[서버] --> RY[register_youtube_source]\n  U --> AQ[ask_question]\n  SV --> SA[save_answer]\n  U --> CR[create_report]\n  CP --> PJ[(projects)]\n  RP --> SR[(sources)]\n  RY --> SR\n  RP --> JB[(processing_jobs)]\n  RY --> JB\n  CR --> RE[(reports)]\n  CR --> JB\n  AQ --> MS[(messages)]\n  SA --> MS\n  AQ --> QT[(quotas)]\n  CR --> QT\n  W[워커] --> CJ[claim_job]\n  CJ --> JB\n  W --> RC[replace_source_chunks]\n  RC --> CH[(source_chunks)]\n  W --> RM[replace_source_moments]\n  RM --> MO[(source_moments)]\n  W --> SD[save_source_digest]\n  SD --> DG[(source_digests)]\n  OP[운영자] --> TD[takedown_video]\n  TD --> VT[(video_takedowns)]\n  VT -. KF451 .-> RY"
     },
     {
       "title": "작업 상태",
@@ -100,8 +100,39 @@
         ] }
       ]
     },
+    "products/knowflow/org/0005_source_digests_takedown_block.sql": {
+      "summary": "조직형에 자료 다이제스트(source_digests·save_source_digest)를 더하고, save_source_summary가 PDF도 받게 하며, 권리자 삭제된 영상을 차단 목록(nomad_knowflow_private.video_takedowns)에 남겨 재등록을 KF451로 막는다. 0001~0004는 고치지 않고 이 파일에서 재정의하며, 0003 takedown 감사 기록으로 차단 목록을 채운다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["source_digests", "자료(유튜브·PDF) 1:1 다이제스트(ready·failed, 계약 형식 jsonb 256KB 이하)와 만든 작업·모델, 읽기는 조직 멤버·자료 활성일 때만"],
+          ["nomad_knowflow_private.video_takedowns", "권리자 삭제된 video_id(전역 차단 키)와 첫 사유, RLS·역할 접근 없음"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["save_source_digest(p_job_id, p_status, p_digest, p_model)", "service_role 전용, 최신 완료 작업·미삭제·활성 자료·현재 청크 인용일 때만 upsert(아니면 false), 형식 오류·url 자료 22023"],
+          ["save_source_summary(p_job_id, p_sentences, p_model)", "재정의: 유튜브·PDF 요약 저장, url은 22023 unsupported_summary_source"],
+          ["takedown_video(p_video_id, p_reason)", "재정의: 차단 목록 기록 + 자료 비활성·청크·장면·요약·다이제스트 삭제, 반환에 digests_deleted"],
+          ["register_youtube_source(p_organization_id, …)", "재정의: 같은 프로젝트 중복(23505) 다음 차단 영상이면 KF451 video_taken_down, takedown과 영상 단위 잠금"]
+        ] },
+        { "title": "보안·잠금 규칙", "items": [
+          ["RPC 전용 쓰기", "source_digests는 SELECT만(authenticated·service_role), 쓰기는 save_source_digest만"],
+          ["실행 권한", "save_source_digest·save_source_summary·takedown_video·register_youtube_source는 service_role만 EXECUTE"]
+        ] }
+      ]
+    },
+    "products/knowflow/user/0005_source_digests_takedown_block.sql": {
+      "summary": "사용자형 0005: 조직형과 같은 다이제스트·PDF 요약·권리자 삭제 영상 재등록 차단(KF451)을 user_id 소유로 둔다. 다이제스트는 본인 소유·자료 활성일 때만 읽는다.",
+      "parts": [
+        { "title": "표", "items": [
+          ["source_digests", "자료 1:1 다이제스트, user_id 소유, 본인만 SELECT"],
+          ["nomad_knowflow_private.video_takedowns", "권리자 삭제된 video_id(모든 사용자 공통 차단), 접근 없음"]
+        ] },
+        { "title": "함수(RPC)", "items": [
+          ["save_source_digest·save_source_summary·takedown_video·register_youtube_source(p_user_id, …)", "조직형과 같은 동작·권한(service_role 전용)"]
+        ] }
+      ]
+    },
     "products/knowflow/check_prelude.sql": { "summary": "검사 공통 준비: 기존 nomad_knowflow 제거, touch_updated_at 임시 정의, 검사용 제품·플랜·한도 시드와 보조 함수를 둔다(run_check.sh가 이식 SQL 앞에 붙인다)." },
-    "products/knowflow/check_org.sql": { "summary": "조직형 검사: 조직 2곳 교차 접근 거부, owner·viewer 역할, 한도·동기화 컬럼·워커 흐름을 확인하고 rollback한다." },
-    "products/knowflow/check_user.sql": { "summary": "사용자형 검사: 합성 사용자 2명 교차 접근 거부, 한도·동기화 컬럼·워커 흐름을 확인하고 rollback한다." }
+    "products/knowflow/check_org.sql": { "summary": "조직형 검사: 조직 2곳 교차 접근 거부, owner·viewer 역할, 한도·동기화 컬럼·워커 흐름, 0003~0005(요약·takedown·캡처·다이제스트·KF451)를 확인하고 rollback한다." },
+    "products/knowflow/check_user.sql": { "summary": "사용자형 검사: 합성 사용자 2명 교차 접근 거부, 한도·동기화 컬럼·워커 흐름, 0003~0005(요약·takedown·캡처·다이제스트·KF451)를 확인하고 rollback한다." }
   }
 }

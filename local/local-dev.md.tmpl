@@ -1,0 +1,31 @@
+<!-- nomad-local: managed -->
+# 로컬 Supabase 실행 (@@SLUG@@)
+
+> scripts/install-local.sh 가 만든다. 이 표식 줄을 지우면 재실행해도 덮어쓰지 않는다. 로컬 전용이다.
+
+## 1. 시작 (Docker 필요)
+```bash
+npx -y supabase@3.2.0 start      # 저장소 루트. 처음엔 이미지 내려받기로 몇 분 걸린다
+```
+- 프로젝트 이름 `@@PROJECT_ID@@`, 포트 API @@API@@ · DB @@DB@@ · Studio @@STUDIO@@ · 메일(Mailpit) @@MAIL@@ (`supabase/config.toml`).
+- Studio(DB 관리 화면): http://127.0.0.1:@@STUDIO@@ · 메일함: http://127.0.0.1:@@MAIL@@
+- 마이그레이션은 시작할 때 자동 적용된다. 초기화: `npx supabase@3.2.0 db reset`. 중지: `npx supabase@3.2.0 stop`.
+- 포트는 NOMAD 등록부(`local/ports.yaml`)에서 제품마다 겹치지 않게 배정된 값이다.
+
+## 2. 환경 변수 (커밋 금지, `.gitignore`의 `.env*`)
+값은 `npx supabase status`로 확인하고 이름만 아래처럼 쓴다.
+- 웹: `NEXT_PUBLIC_SUPABASE_URL`(http://127.0.0.1:@@API@@) · `NEXT_PUBLIC_SUPABASE_ANON_KEY` · `SUPABASE_SERVICE_ROLE_KEY` · `NEXT_PUBLIC_SITE_URL`(@@SITE_URL@@)
+@@IF_ROLE@@
+- Worker: `DATABASE_URL`(postgresql://@@ROLE@@:<비밀번호>@127.0.0.1:@@DB@@/postgres) · `SUPABASE_URL` · `SUPABASE_SERVICE_ROLE_KEY`
+@@END_ROLE@@
+
+## 3. 스키마
+이 제품의 표는 `nomad_@@SCHEMA@@` 스키마에 있다(Studio의 Table Editor에서 스키마를 고른다).
+@@IF_ROLE@@
+
+## 4. Worker 역할 비밀번호 (DB를 초기화할 때마다)
+```bash
+docker exec supabase_db_@@PROJECT_ID@@ psql -U postgres -c "alter role @@ROLE@@ password '<비밀번호>'"
+```
+Worker 로그인 역할(`@@ROLE@@`)은 클러스터 롤이다. 마이그레이션이 만들지 않았으면 먼저 `create role @@ROLE@@ login nosuperuser nobypassrls; grant service_role to @@ROLE@@;` 로 만든다.
+@@END_ROLE@@

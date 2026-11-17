@@ -362,6 +362,7 @@ select public.t_eq((select (j ->> 'sources')::int from t_job), 2, 'takedown 자�
 select public.t_eq((select (j ->> 'chunks_deleted')::int from t_job), 4, 'takedown 청크 4건 삭제');
 select public.t_eq((select (j ->> 'moments_deleted')::int from t_job), 2, 'takedown 장면 2건 삭제');
 select public.t_eq((select (j ->> 'summaries_deleted')::int from t_job), 2, 'takedown 요약 2건 삭제');
+select public.t_eq((select (j ->> 'digests_deleted')::int from t_job), 0, 'takedown 반환 digests_deleted(다이제스트 없음 0)');
 select public.t_eq((select (j ->> 'active_jobs')::int from t_job), 2, 'takedown 진행 중 작업 2건');
 -- takedown 뒤 진행 중 작업의 재저장 거부(false, 아무것도 안 바뀜)
 select public.t_eq((select count(*) from nomad_knowflow.replace_source_chunks((select v from t_ids where k = 'jr_ta'), 1,
@@ -523,6 +524,146 @@ select public.t_eq((select cardinality(nomad_knowflow.claim_capture_object_trash
 reset role;
 select public.t_eq((select count(*) from nomad_knowflow_private.capture_object_trash where storage_path like 'stall/%'), 4, '상한 넘은 행은 대기열에 남음');
 
+
+-- ===== 0005: 다이제스트 격리·권한·저장 조건 + PDF 요약 + 권리자 삭제 영상 재등록 차단(KF451) =====
+-- 준비(postgres): O1 프로젝트 2개(5…01·5…03)·O2 프로젝트 1개(5…02). 자료: da(O1 유튜브 digvideo001) · db(O2 유튜브) · dp(O1 PDF) · du(O1 url)
+--   · dx(O1 삭제) · dy(O1 비활성). 자료마다 청크 1개(c_*)·succeeded 작업 jd_*, da에는 더 일찍 끝난 작업 jo_da
+reset role;
+update nomad_core.subscriptions set ends_at = null
+ where organization_id = '01010101-0000-0000-0000-000000000001' and product_code = 'knowflow';
+-- 차단 안 된 영상 등록 확인용: O1(B 구독) 자료 한도
+insert into nomad_core.plan_limits (product_code, plan_code, limit_key, limit_value) values
+  ('knowflow', 'B', 'max_sources_per_project', 2), ('knowflow', 'B', 'max_video_seconds', 600),
+  ('knowflow', 'B', 'monthly_source_jobs', 100), ('knowflow', 'B', 'monthly_video_seconds', 100000)
+on conflict (product_code, plan_code, limit_key) do update set limit_value = excluded.limit_value;
+insert into nomad_knowflow.projects (id, organization_id, name) values
+  ('50000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'O1 다이제스트'),
+  ('50000000-0000-0000-0000-000000000002', '02020202-0000-0000-0000-000000000002', 'O2 다이제스트'),
+  ('50000000-0000-0000-0000-000000000003', '01010101-0000-0000-0000-000000000001', 'O1 재등록');
+insert into t_ids (k, v) values
+  ('da', '51000000-0000-0000-0000-000000000001'), ('db', '51000000-0000-0000-0000-000000000002'),
+  ('dp', '51000000-0000-0000-0000-000000000003'), ('du', '51000000-0000-0000-0000-000000000004'),
+  ('dx', '51000000-0000-0000-0000-000000000005'), ('dy', '51000000-0000-0000-0000-000000000006');
+insert into nomad_knowflow.sources (id, project_id, organization_id, source_type, title, original_url, video_id, storage_path, status, deleted_at, unavailable_at)
+select (select v from t_ids where k = x.k), x.p::uuid, x.o::uuid, x.t, '자료 ' || x.k,
+       case x.t when 'youtube' then 'https://www.youtube.com/watch?v=' || x.vid when 'url' then 'https://example.invalid/a' end,
+       x.vid, case when x.t = 'pdf' then x.o || '/' || x.p || '/d.pdf' end, 'completed',
+       case when x.k = 'dx' then now() end, case when x.k = 'dy' then now() end
+  from (values
+    ('da', '50000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'youtube', 'digvideo001'),
+    ('db', '50000000-0000-0000-0000-000000000002', '02020202-0000-0000-0000-000000000002', 'youtube', 'digvideo002'),
+    ('dp', '50000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'pdf', null),
+    ('du', '50000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'url', null),
+    ('dx', '50000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'youtube', 'digvideo003'),
+    ('dy', '50000000-0000-0000-0000-000000000001', '01010101-0000-0000-0000-000000000001', 'youtube', 'digvideo004')) x(k, p, o, t, vid);
+insert into t_ids (k, v) select 'c_' || k, gen_random_uuid() from unnest(array['da', 'db', 'dp', 'du', 'dx', 'dy']) k;
+insert into t_ids (k, v) select 'jd_' || k, gen_random_uuid() from unnest(array['da', 'db', 'dp', 'du', 'dx', 'dy']) k;
+insert into t_ids (k, v) values ('jo_da', gen_random_uuid());
+insert into nomad_knowflow.source_chunks (id, source_id, project_id, chunk_index, content)
+select (select v from t_ids where k = 'c_' || x.k), s.id, s.project_id, 0, '청크'
+  from unnest(array['da', 'db', 'dp', 'du', 'dx', 'dy']) x(k) join nomad_knowflow.sources s on s.id = (select v from t_ids where k = x.k);
+insert into nomad_knowflow.processing_jobs (id, organization_id, source_id, job_type, status, progress, attempt_count, started_at, finished_at)
+select (select v from t_ids where k = 'jd_' || x.k), s.organization_id, s.id, 'source_ingest', 'succeeded', 100, 1, now(), now()
+  from unnest(array['da', 'db', 'dp', 'du', 'dx', 'dy']) x(k) join nomad_knowflow.sources s on s.id = (select v from t_ids where k = x.k);
+insert into nomad_knowflow.processing_jobs (id, organization_id, source_id, job_type, status, progress, attempt_count, started_at, finished_at)
+select (select v from t_ids where k = 'jo_da'), s.organization_id, s.id, 'source_ingest', 'succeeded', 100, 1, now() - interval '2 hours', now() - interval '1 hour'
+  from nomad_knowflow.sources s where s.id = (select v from t_ids where k = 'da');
+-- 계약 형식 다이제스트(자료마다 자기 청크 인용). 'x_da'는 db 청크를 인용(다른 자료 chunk_id)
+create temp table t_dg (k text primary key, d jsonb);
+grant all on t_dg to public;
+insert into t_dg select x.k, jsonb_build_object('version', 1, 'title', '제목',
+  'glance', jsonb_build_array(jsonb_build_object('text', '한눈 1', 'details', '[]'::jsonb, 'chunk_ids', jsonb_build_array(x.c)),
+                              jsonb_build_object('text', '한눈 2', 'details', '[]'::jsonb, 'chunk_ids', jsonb_build_array(x.c))),
+  'terms', '[]'::jsonb,
+  'chapters', jsonb_build_array(jsonb_build_object('title', '장', 'intro', '', 'chunk_ids', jsonb_build_array(x.c),
+    'points', jsonb_build_array(jsonb_build_object('text', '요점', 'subpoints', '[]'::jsonb, 'chunk_ids', jsonb_build_array(x.c))))))
+  from (select u.k, (select v::text from t_ids where k = 'c_' || u.k) from unnest(array['da', 'db', 'dp', 'du', 'dx', 'dy']) u(k)
+        union all select 'x_da', (select v::text from t_ids where k = 'c_db')) x(k, c);
+create temp table t_kf5 (k text primary key, ok boolean);
+grant all on t_kf5 to public;
+
+-- 실행 권한: service_role만
+select public.t_eq((select count(*) from (values ('anon'), ('authenticated'), ('service_role')) r(n),
+  (values ('nomad_knowflow.save_source_digest(uuid, text, jsonb, text)'), ('nomad_knowflow.save_source_summary(uuid, jsonb, text)'),
+          ('nomad_knowflow.takedown_video(text, text)'), ('nomad_knowflow.register_youtube_source(uuid, uuid, text, text, text, integer, text, text)')) f(s)
+  where has_function_privilege(r.n, f.s, 'execute')), 4, '0005 함수 실행 권한은 service_role만(4건)');
+select public.t_eq((select count(*) from (values ('anon'), ('authenticated'), ('service_role')) r(n)
+  where has_function_privilege(r.n, 'nomad_knowflow.save_source_digest(uuid, text, jsonb, text)', 'execute') and r.n <> 'service_role'), 0, 'save_source_digest anon·authenticated 실행 권한 없음');
+select public.t_eq((select count(*) from (values ('anon'), ('authenticated'), ('service_role')) r(n)
+  where has_table_privilege(r.n, 'nomad_knowflow_private.video_takedowns', 'select')), 0, 'video_takedowns 역할 접근 없음');
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_expect(format($q$select nomad_knowflow.save_source_digest(%L, 'failed', null, 'm')$q$, (select v from t_ids where k = 'jd_da')), '42501');
+select public.t_expect($q$insert into nomad_knowflow.source_digests (source_id, project_id, organization_id, job_id, status, model)
+  values (gen_random_uuid(), gen_random_uuid(), '01010101-0000-0000-0000-000000000001', gen_random_uuid(), 'failed', 'm')$q$, '42501');
+select public.t_role('anon');
+select public.t_expect(format($q$select nomad_knowflow.save_source_digest(%L, 'failed', null, 'm')$q$, (select v from t_ids where k = 'jd_da')), '42501');
+select public.t_expect($q$select * from nomad_knowflow.source_digests$q$, '42501');
+
+-- 저장(service_role): 형식 오류 22023, 조건 불일치 false
+select public.t_role('service_role');
+select public.t_expect(format($q$select nomad_knowflow.save_source_digest(%L, 'failed', '{}', 'm')$q$, (select v from t_ids where k = 'jd_da')), '22023');
+-- 크기 상한만 독립 검증: 정상 형식 다이제스트에 pad 키를 더한다. 작은 pad는 형식 통과(낡은 작업이라 false), 256KB 초과 pad만 22023
+select public.t_eq((select count(*) from nomad_knowflow.save_source_digest((select v from t_ids where k = 'jo_da'),
+  'ready', (select d from t_dg where k = 'da') || jsonb_build_object('pad', repeat('x', 1000)), 'm') r where not r), 1, '정상 형식+작은 pad는 형식 통과(false)');
+select public.t_eq((select (octet_length(((select d from t_dg where k = 'da') || jsonb_build_object('pad', repeat('x', 262145)))::text) > 262144)::int), 1, '큰 pad 다이제스트는 256KB 초과');
+select public.t_expect(format($q$select nomad_knowflow.save_source_digest(%L, 'ready', %L, 'm')$q$, (select v from t_ids where k = 'jo_da'),
+  (select d from t_dg where k = 'da') || jsonb_build_object('pad', repeat('x', 262145))), '22023');
+select public.t_expect(format($q$select nomad_knowflow.save_source_digest(%L, 'ready', '{"version":1}', 'm')$q$, (select v from t_ids where k = 'jd_da')), '22023');
+select public.t_expect(format($q$select nomad_knowflow.save_source_digest(%L, 'ready', %L, 'm')$q$, (select v from t_ids where k = 'jd_du'),
+  (select d from t_dg where k = 'du')), '22023');
+insert into t_kf5 select x.k, nomad_knowflow.save_source_digest((select v from t_ids where k = x.j), x.st, (select d from t_dg where k = x.dk), 'digest-model')
+  from (values ('da', 'jd_da', 'ready', 'da'), ('db', 'jd_db', 'ready', 'db'), ('dp', 'jd_dp', 'failed', null),
+               ('old', 'jo_da', 'ready', 'da'), ('other_chunk', 'jd_da', 'ready', 'x_da'),
+               ('deleted', 'jd_dx', 'ready', 'dx'), ('inactive', 'jd_dy', 'ready', 'dy')) x(k, j, st, dk);
+select public.t_eq((select count(*) from t_kf5 where ok and k in ('da', 'db', 'dp')), 3, '다이제스트 저장 3건(ready 2·failed 1)');
+select public.t_eq((select count(*) from t_kf5 where not ok and k in ('old', 'other_chunk', 'deleted', 'inactive')), 4, '낡은 작업·다른 자료 청크·삭제·비활성 자료 false');
+select public.t_eq((select count(*) from nomad_knowflow.save_source_digest((select v from t_ids where k = 'jd_da'), 'failed', null, 'digest-model-2') r where r), 1, '재저장 true');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests where source_id = (select v from t_ids where k = 'da')), 1, '재저장은 1행 upsert');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests where source_id = (select v from t_ids where k = 'da') and status = 'failed' and digest is null and model = 'digest-model-2'), 1, '재저장 값 갱신');
+select public.t_eq((select count(*) from nomad_knowflow.save_source_digest((select v from t_ids where k = 'jd_da'), 'ready', (select d from t_dg where k = 'da'), 'digest-model') r where r), 1, 'ready로 다시 저장');
+
+-- PDF 요약 저장 true, url 요약 22023 unsupported_summary_source
+select public.t_eq((select count(*) from nomad_knowflow.save_source_summary((select v from t_ids where k = 'jd_dp'),
+  jsonb_build_array(jsonb_build_object('text', 'PDF 요약', 'chunk_ids', jsonb_build_array((select v::text from t_ids where k = 'c_dp')))), 'm') r where r), 1, 'PDF 요약 저장 true');
+do $$ begin
+  perform nomad_knowflow.save_source_summary((select v from t_ids where k = 'jd_du'),
+    jsonb_build_array(jsonb_build_object('text', 'url 요약', 'chunk_ids', jsonb_build_array((select v::text from t_ids where k = 'c_du')))), 'm');
+  raise exception 'FAIL url 요약이 저장됨';
+exception when sqlstate '22023' then
+  if sqlerrm <> 'unsupported_summary_source' then raise exception 'FAIL url 요약 오류 %', sqlerrm; end if;
+  raise notice 'ok  url 요약 22023 unsupported_summary_source';
+end $$;
+reset role;
+
+-- 격리: 다른 조직 다이제스트는 0건, viewer는 자기 조직 읽기
+select public.t_login('aaaaaaaa-0000-0000-0000-00000000000a');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests), 2, 'A는 자기 조직 다이제스트 2건(da·dp)');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests where source_id = (select v from t_ids where k = 'db')), 0, 'A는 조직 2 다이제스트 0건');
+select public.t_login('bbbbbbbb-0000-0000-0000-00000000000b');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests), 1, 'B는 자기 조직 다이제스트 1건');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests where organization_id = '01010101-0000-0000-0000-000000000001'), 0, 'B는 조직 1 다이제스트 0건');
+select public.t_login('cccccccc-0000-0000-0000-00000000000c');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests), 2, 'viewer C는 조직 1 다이제스트 2건 읽기');
+reset role;
+
+-- takedown: 다이제스트 삭제 + 차단 기록 → 같은 영상 재등록 KF451(같은 프로젝트는 중복 23505가 먼저)
+select public.t_role('service_role');
+delete from t_job;
+insert into t_job select nomad_knowflow.takedown_video('digvideo001', '권리자 요청(0005 검사)');
+select public.t_eq((select (j ->> 'digests_deleted')::int from t_job), 1, 'takedown 다이제스트 1건 삭제');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests where source_id = (select v from t_ids where k = 'da')), 0, 'takedown 자료 다이제스트 0');
+select public.t_eq((select count(*) from nomad_knowflow.source_digests where source_id = (select v from t_ids where k = 'db')), 1, '다른 영상 다이제스트 유지');
+select public.t_expect($q$select nomad_knowflow.register_youtube_source('01010101-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000003',
+  'digvideo001', '재등록', '채널', 60, 'kf451-a', 'h')$q$, 'KF451');
+select public.t_expect($q$select nomad_knowflow.register_youtube_source('01010101-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001',
+  'digvideo001', '재등록', '채널', 60, 'kf451-b', 'h')$q$, '23505');
+select public.t_eq((select count(*) from nomad_knowflow.save_source_digest((select v from t_ids where k = 'jd_da'), 'ready', (select d from t_dg where k = 'da'), 'm') r where not r), 1, 'takedown 뒤 save_source_digest false');
+-- 차단되지 않은 영상은 등록된다
+select public.t_eq((select count(*) from nomad_knowflow.register_youtube_source('01010101-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000003',
+  'digvideo009', '새 영상', '채널', 60, 'kf451-c', 'h') r where (r ->> 'duplicate')::boolean = false), 1, '차단 안 된 영상 등록');
+reset role;
+select public.t_eq((select count(*) from nomad_knowflow_private.video_takedowns where video_id in ('digvideo001', 'tkdnvideo01', 'capvideo002')), 3, '차단 목록: 0003·0004·0005 검사의 takedown 영상 3건');
+select public.t_eq((select count(*) from nomad_knowflow.sources where video_id = 'digvideo001' and deleted_at is null), 1, 'KF451 거부는 자료를 만들지 않음');
 
 select 'ORG CHECK PASSED' as result;
 rollback;

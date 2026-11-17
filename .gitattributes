@@ -1,0 +1,4 @@
+# 셸 스크립트·템플릿은 CRLF 체크아웃 시 bash 가 깨지므로 항상 LF
+*.sh text eol=lf
+local/*.tmpl text eol=lf
+local/ports.yaml text eol=lf

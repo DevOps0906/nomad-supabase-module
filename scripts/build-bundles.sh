@@ -9,6 +9,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIG="$ROOT/supabase/migrations"
 OUT="$ROOT/bundles"
+LOCAL_DIR="$ROOT/local"
+source "$LOCAL_DIR/render.sh"   # 로컬 키트 렌더(포트 등록부·템플릿)
 # products/*/ 자동 수집(이름순 = 번호 NN · org/ 가 있는 제품만 · 격리형 hospital 제외)
 SLUGS=()
 for d in "$ROOT"/products/*/; do
@@ -106,6 +108,10 @@ secret = "env(KAKAO_CLIENT_SECRET)"
 # 필요한 확장
 $(for s in "$@"; do echo "# - $s: $(ext_note "$s")"; done)
 TOML
+  # 로컬 키트: 완성된 config.toml(첫 제품의 포트 블록 · 모든 제품 스키마)과 실행 안내
+  mkdir -p "$b/docs"
+  render_tmpl "$LOCAL_DIR/config.toml.tmpl" "$*" "http://localhost:3000" > "$b/supabase/config.toml"
+  render_tmpl "$LOCAL_DIR/local-dev.md.tmpl" "$*" "http://localhost:3000" > "$b/docs/local-dev.md"
   {
     echo "# $title"
     echo
@@ -117,7 +123,7 @@ TOML
     echo
     echo "## 적용"
     echo "1. 새 Supabase 프로젝트를 만든다(운영 프로젝트와 분리)."
-    echo "2. 이 폴더에서 \`supabase init\`(supabase/config.toml 생성) → \`supabase/config.snippet.toml\` 내용을 config.toml 의 같은 절에 병합한다."
+    echo "2. 로컬 실행은 번들의 \`supabase/config.toml\`(전용 포트·Studio 포함, 안내 \`docs/local-dev.md\`)을 그대로 쓴다. 이미 config.toml 이 있는 프로젝트는 \`supabase/config.snippet.toml\` 내용을 같은 절에 병합한다."
     echo "3. \`supabase link --project-ref <ref>\` → \`supabase db push\`."
     echo "4. 병합한 [api] schemas 와 Auth 제공자(google·kakao)를 \`supabase config push\`(또는 대시보드 API·Auth 설정)로 호스티드 프로젝트에 반영한다."
     echo "5. 필요한 확장(아래)을 확인한다."

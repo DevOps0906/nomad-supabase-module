@@ -1,7 +1,7 @@
 # NOW — 재진입 스냅샷 (30줄 이내, 매 작업 끝에 덮어쓴다)
 
-- 갱신: 2026-11-17
-- 브랜치: main(푸시 완료)
+- 갱신: 2026-11-18
+- 브랜치: feat/local-kit(task-033 로컬 Studio 키트 구현 중: local/·install-local.sh·install-db 연동·번들 config.toml, 테스트 tests/install_local.sh 51/0, 리뷰·푸시 대기)
 - 최우선(사용자 2026-11-16): KNOWFLOW 유튜브 요약·중요 장면 캡처. 029·030 구현·리뷰 반영 완료, 플래그 기본 꺼짐
 - 제품 레포 5개 worktree `D:/WorkSpace/DEV/_wt/<레포>-nomad-db` 브랜치 feat/nomad-db 푸시·PR(병합 보류): humscore#12 · LOTTO-LAB#4 · ContentFlow#1 · KNOWFLOW#5 · Shorts#1
 - task-032(운영 데이터 이관) 진행 중: 레포마다 `supabase/nomad-cutover/`(01 동결·undo, 02 복사 dry-run 기본, 03 Storage[KNOWFLOW·Shorts], check.sh)와 `docs/ops/NOMAD_DB_CUTOVER.md` 커밋·푸시. 각 check.sh 로컬 PASS(humscore·LOTTO-LAB은 accounts 파일 추가 조건에서 PASS)

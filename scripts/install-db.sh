@@ -5,16 +5,19 @@
 #   제품 파일은 scripts/build-bundles.sh 의 add_product 와 같은 규칙으로 고르고 이름을 붙인다(번들과 같은 파일 목록).
 #   기본 안: user/ 가 있으면 user, 없으면 org. 격리형(isolated/, 예: hospital)은 core 없이 단독으로만 설치한다.
 #   supabase/migrations 의 옛 제품 청사진(*_<slug>.sql)은 설치하지 않는다(--with-example 의 contentflow_example 만 예외).
+#   --product 가 있으면 복사 뒤 scripts/install-local.sh 로 로컬 키트(supabase/config.toml·포트·Studio·docs/runbooks/local-dev.md)도 만든다(--no-local 로 끔).
+#   --product 가 있으면 대상에 supabase/migrations/ 가 없어도 만든다(supabase init 불필요). 제품 없이 실행하면 기존처럼 init 을 요구한다.
 # 종료 코드: 0 정상·최신 / 1 --check에서 복사할 새 파일 있음 / 2 대상 파일이 원본과 다름 / 64 사용법·대상 오류
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/supabase/migrations"
-USAGE="사용법: $0 <대상 저장소> [--product <slug>[:user|org]]... [--with-accounts] [--with-example] [--check]"
+USAGE="사용법: $0 <대상 저장소> [--product <slug>[:user|org]]... [--with-accounts] [--with-example] [--check] [--no-local]"
 
-TARGET=""; CHECK=0; ACCOUNTS=0; EXAMPLE=0; PRODUCTS=()
+TARGET=""; NOLOCAL=0; CHECK=0; ACCOUNTS=0; EXAMPLE=0; PRODUCTS=()
 while (($#)); do
   case "$1" in
     --check) CHECK=1;;
+    --no-local) NOLOCAL=1;;
     --with-accounts) ACCOUNTS=1;;
     --with-example) EXAMPLE=1;;
     --product)
@@ -28,7 +31,7 @@ while (($#)); do
 done
 [[ -n "$TARGET" ]] || { echo "$USAGE" >&2; exit 64; }
 DST="$TARGET/supabase/migrations"
-if [[ ! -d "$DST" ]]; then
+if [[ ! -d "$DST" ]] && { ((CHECK)) || ((${#PRODUCTS[@]} == 0)); }; then
   echo "대상에 supabase/migrations/가 없습니다. 먼저 대상에서 npx supabase init 을 실행하세요." >&2; exit 64; fi
 LOCK="$TARGET/supabase/nomad.lock"
 
@@ -174,10 +177,11 @@ fi
 
 if ((CHECK)); then
   ((${#NEW[@]})) && exit 1
-  echo "최신 상태입니다."; exit 0
+  echo "최신 상태입니다. (로컬 키트 상태는 bash scripts/install-local.sh <대상> --product <slug> --check)"; exit 0
 fi
 
 # 복사 + 잠금 기록: 임시 파일에 모두 쓴 뒤 mv로 반영한다. 쓰는 중 실패하면 임시 파일만 지우고 대상은 그대로 둔다.
+mkdir -p "$DST"
 STAGED=()
 cleanup() { for t in ${STAGED[@]+"${STAGED[@]}"}; do rm -f "$t"; done; }
 trap cleanup EXIT
@@ -191,6 +195,8 @@ for p in ${UNIQ[@]+"${UNIQ[@]}"}; do flags+=" --product $p"; done
   echo "# nomad-supabase-module install-db.sh 가 씁니다. 손으로 고치지 마세요."
   echo "# source $sha"
   echo "# flags${flags}"
+  # install-local.sh 가 기록한 로컬 키트 줄은 보존한다
+  [[ -f "$LOCK" ]] && { grep '^# local ' "$LOCK" | tr -d '\r' || true; }
   for n in "${SORTED[@]}"; do echo "$n  $(hash "${FROM[$n]}")"; done
 } > "$LOCK.tmp"
 STAGED+=("$LOCK.tmp")
@@ -198,3 +204,13 @@ for n in ${NEW[@]+"${NEW[@]}"}; do mv "$DST/.$n.tmp" "$DST/$n"; done
 mv "$LOCK.tmp" "$LOCK"
 echo "✓ ${#NEW[@]}개 복사 · supabase/nomad.lock 기록"
 echo "다음: 대상에서 npx supabase db reset --local 로 순서대로 적용을 확인하세요."
+# 로컬 키트(config.toml·포트·runbook): 제품이 있고 --no-local 이 아닐 때. 표식 없는 기존 config 가 있으면 exit 2.
+if ((!NOLOCAL && ${#UNIQ[@]})); then
+  # 로컬 키트 기준 제품: 잠금의 # local 줄(이미 있으면 유지) > 사용자가 준 첫 --product. 나머지는 schemas 용.
+  base=""; [[ -f "$LOCK" ]] && base="$(grep '^# local ' "$LOCK" | head -n1 | awk '{print $3}' | tr -d '\r' || true)"
+  [[ -n "$base" ]] || base="${PRODUCTS[0]%%:*}"
+  LPROD=(--product "$base")
+  for p in "${PRODUCTS[@]}"; do s="${p%%:*}"; [[ " ${LPROD[*]} " == *" $s "* ]] || LPROD+=(--product "$s"); done
+  lrc=0; bash "$ROOT/scripts/install-local.sh" "$TARGET" "${LPROD[@]}" || lrc=$?
+  exit "$lrc"
+fi
