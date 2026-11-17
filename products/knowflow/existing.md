@@ -1,7 +1,7 @@
 # KNOWFLOW-AI 기존 DB → nomad_core 이식 대응표 (task-012)
 
-원본: `D:\WorkSpace\DEV\KNOWFLOW-AI\supabase\migrations\` 17개(최종 상태) · 앱 코드 `apps/web`(@supabase/ssr) · `apps/worker`(pg.Pool, SET ROLE service_role).
-이식: `user/0001_knowflow.sql`+`0002_storage.sql`(단일안, 소유 user_id) · `org/…`(조직안, 소유 organization_id). 스키마 `nomad_knowflow`(노출) · `nomad_knowflow_private`(내부, 노출 안 함).
+원본: `D:\WorkSpace\DEV\KNOWFLOW-AI\supabase\migrations\` 22개(최종 상태, 20261118000200까지) · 앱 코드 `apps/web`(@supabase/ssr) · `apps/worker`(pg.Pool, SET ROLE service_role).
+이식: `user/0001_knowflow.sql`+`0002_storage.sql`(+`0003`~`0005` 후속 파일, 단일안, 소유 user_id) · `org/…`(조직안, 소유 organization_id). 스키마 `nomad_knowflow`(노출) · `nomad_knowflow_private`(내부, 노출 안 함).
 검증: `bash products/knowflow/run_check.sh user|org` (begin → 청사진 drop → 적용 → 교차 거부 → rollback, 둘 다 통과).
 사용처 약어: 웹=apps/web, 워커=apps/worker, 서버=웹 서버(service_role).
 
@@ -23,7 +23,10 @@
 | usage_events | 이관(원 단위 정수) | nomad_knowflow.usage_events | 워커 insert · 웹 읽기 | user_id(null 허용) → organization_id(null 허용) |
 | idempotency_keys | 이관(내부) | nomad_knowflow_private.idempotency_keys | RPC 내부 | PK (user_id,key) → (organization_id,key) |
 | auth_rate_limits | 이관(내부) | nomad_knowflow_private.auth_rate_limits | RPC 내부 | 비식별 키(소유 컬럼 없음) |
-| (task-029 초안) source_summaries | 이관(`0003_youtube_summary_takedown.sql`) | nomad_knowflow.source_summaries | 워커 RPC 쓰기(save_source_summary) · 웹 읽기 | user_id → organization_id |
+| (task-029 초안) source_summaries | 이관(`0003_youtube_summary_takedown.sql`, PDF 허용은 `0005`) | nomad_knowflow.source_summaries | 워커 RPC 쓰기(save_source_summary) · 웹 읽기 | user_id → organization_id |
+| source_digests (20261118000200) | 이관(`0005_source_digests_takedown_block.sql`) | nomad_knowflow.source_digests | 워커 RPC 쓰기(save_source_digest) · 웹 읽기 | user_id → organization_id |
+| rights_takedowns (20261112000500) | 대체: 감사는 `nomad_core.write_audit`, 재등록 차단 키만 `0005`에 | nomad_knowflow_private.video_takedowns (video_id 전역, RLS·접근 없음) | takedown_video 쓰기 · register_youtube_source 읽기 | 소유 컬럼 없음(모든 소유자 공통 차단) |
+| source_captures · capture_purge_queue (20261117000100) | 재설계 이관(`0004`, 아래 "영상 캡처") | nomad_knowflow.source_captures · nomad_knowflow_private.capture_object_trash | 웹 RPC · 정리 작업 | user_id → organization_id |
 - 동기화 대상 4개(projects·sources·conversations·reports): `updated_at`·`deleted_at`·`nomad_core.touch_updated_at()` 트리거·`(소유 컬럼, updated_at)` 인덱스(`*_user_sync_idx`/`*_org_sync_idx`). conversations·reports는 `deleted_at`을 새로 추가했다(원본에는 없음). RLS는 `deleted_at is null`만 보여 주고, 삭제 전파는 서버/RPC(service_role)가 `deleted_at > 마지막 동기 시각`으로 조회한다.
 
 ## plan_limits 키 (수치 시드 안 함 — 원본 beta 값은 참고용, 설정은 코어 시드가 정한다)
@@ -55,6 +58,8 @@
 | (신규, task-017) ask_question(대화 id, 내용, 멱등 키) | 신규 | nomad_knowflow.ask_question | 웹 RPC(authenticated) | 반환 `{message_id, answer_id, duplicate}`. org안은 쓰기 역할(owner·admin·editor)만 |
 | (신규, task-017) save_answer(질문 메시지 id, 내용, 인용 jsonb) | 신규 | nomad_knowflow.save_answer | 서버 RPC(service_role) | 반환 `{answer_id, duplicate}`. 질문당 답변 1개(`messages.reply_to`). 환불된 질문은 KF409 `question_refunded` |
 | (신규, 2026-11-16 결정 2) refund_question_quota(질문 메시지 id) | 신규 | nomad_knowflow.refund_question_quota | 서버 RPC(service_role만) | 반환 `{refunded}`. 답변 실패 시 질문 쿼터 1회 환불 |
+| save_source_digest(작업, 상태, 다이제스트, 모델) (20261118000200) | 이관(`0005`) | nomad_knowflow.save_source_digest | 워커 RPC(service_role만) | 동일 |
+| save_source_summary (20261118000100 재정의) · takedown_video · register_youtube_source(KF451, 20261112000500) | `0005`에서 create or replace | nomad_knowflow.* | 워커·운영자·서버 RPC(service_role만) | 아래 "자료 다이제스트·PDF 요약·재등록 차단" |
 | (신규, task-017) create_report(프로젝트 id, 제목, 멱등 키) | 신규 | nomad_knowflow.create_report | 웹 RPC(authenticated) | 반환 `{report_id, job_id, duplicate}`. 보고서(generating)+report_generate 잡 생성 |
 | handle_new_user(auth.users 트리거) · update_profile | 대체: nomad_core.handle_new_user(프로필·개인 조직 자동 생성) | (만들지 않음) | 앱 직접 사용 없음 | — |
 | touch_updated_at | 대체: nomad_core.touch_updated_at (task-011, 그 전엔 검사 때 임시 정의) | (만들지 않음) | 트리거 | — |
@@ -99,12 +104,24 @@
 ## 영상 요약·권리자 삭제 (`0003_youtube_summary_takedown.sql`, KNOWFLOW-AI task-029)
 | 경로 | 순서 | 오류 |
 |---|---|---|
-| save_source_summary (service_role) | 작업(최신 succeeded source_ingest) → 자료 잠금(미삭제·`unavailable_at is null`) → 인용 청크가 모두 그 자료 것 → upsert | 형식 22023 · 조건 불일치 false |
+| save_source_summary (service_role) | 작업(최신 succeeded source_ingest) → 자료 잠금(미삭제·`unavailable_at is null`) → 유튜브·PDF → 인용 청크가 모두 그 자료 것 → upsert | 22023 `invalid_summary`(형식·모델명, chunk_ids 누락 포함) · 22023 `unsupported_summary_source`(url, 0005부터. 0003의 `not_youtube_source`는 더 나지 않음) · 조건 불일치 false |
 | replace_source_chunks · replace_source_moments (0003에서 재정의, service_role) | 작업 펜싱(running·attempt) → 자료 잠금(미삭제·`unavailable_at is null`) → 통째 교체(청크 교체 시 요약도 삭제) | 비활성·삭제 자료는 false(아무것도 안 바꿈) — takedown 뒤 진행 중 작업이 되살리지 못함 |
-| takedown_video (service_role) | 해당 video_id 모든 자료 비활성 → 청크·장면·요약 삭제 → `nomad_core.write_audit` | 22023(video_id·사유). 반환 `active_jobs`가 0이 아니면 작업 종료 뒤 재실행 |
+| takedown_video (service_role) | (0005) 영상 단위 잠금 → 차단 목록 기록 → 해당 video_id 모든 자료 비활성 → 청크·장면·요약·다이제스트 삭제 → `nomad_core.write_audit` | 22023(video_id·사유). 반환 `{sources, chunks_deleted, moments_deleted, summaries_deleted, digests_deleted(0005), active_jobs}`. `active_jobs`가 0이 아니면 작업 종료 뒤 재실행 |
 - 검사: 요약 소유 격리·authenticated/anon 실행 거부·takedown 뒤 replace_*/save 거부·다른 video_id 자료 유지(check_user·check_org).
 
+## 자료 다이제스트·PDF 요약·재등록 차단 (`0005_source_digests_takedown_block.sql`)
+| 경로 | 순서 | 오류 |
+|---|---|---|
+| save_source_digest (service_role) | 형식(ready=계약 형식·256KB 이하, failed=다이제스트 null) → 작업(최신 succeeded source_ingest) → 자료 잠금(미삭제·활성) → 유튜브·PDF → (ready) 모든 chunk_ids가 그 자료 청크 → upsert(자료 1:1) | 22023 `invalid_digest` · 22023 `unsupported_digest_source`(url) · 조건 불일치 false |
+| register_youtube_source (service_role) | 0001 순서 + 같은 프로젝트 중복(23505) 다음 영상 단위 잠금 → 차단 목록 확인 → 한도·쿼터 | KF451 `video_taken_down`(차감·자료 생성 없음) |
+- 다이제스트는 청크가 바뀌어도 지우지 않는다(job_id ≠ 최신 성공 작업이면 조회 API가 pending). 권리자 삭제 때만 지운다. 읽기 = 소유자(org안 조직 멤버)·자료 활성.
+- 차단 목록은 video_id 전역(모든 소유자 공통, 원본 rights_takedowns 조회와 같은 범위). 업그레이드 시 0003 takedown 감사 기록(`knowflow.rights_takedown`)으로 채운다.
+- 앱 변경: 워커는 `rpc('save_source_digest')`·PDF 요약 저장(schema `nomad_knowflow`), 서버는 KF451을 "권리자 요청으로 등록할 수 없는 영상"으로 안내.
+- 검사: 다른 소유자 다이제스트 0건 · anon·authenticated 실행 42501 · 낡은 작업·다른 자료 청크·삭제·비활성 false · failed+다이제스트·256KB 초과·url 22023 · PDF 요약 true · 재저장 1행 · takedown 뒤 digests 삭제·KF451 · service_role만 EXECUTE(check_user·check_org). 업그레이드 경로(0001~0004 적용·0003 takedown 뒤 0005만 적용)도 확인.
+
 ## 영상 캡처 (`0004_youtube_captures.sql`, KNOWFLOW-AI task-030)
+- 원본(20261117000100)과 설계가 다르다(이식본 0004 유지, 0005에 SQL 추가 없음). 원본: service_role RPC `reserve_capture`(멱등 키·pending) → 서버 업로드 → `confirm_capture`(ready·바이트) / `discard_capture`, 대기열 `capture_purge_queue`(+`enqueue_capture_purge`, 웹 서버 purgeCaptures 처리), 버킷 `captures`(WebP·JPEG, authenticated 정책 없음). 이식본: authenticated RPC `create_source_capture`(쓰기 역할, 행 생성 = 업로드 허가, 상태 없음) → 웹이 행 경로로 직접 업로드 → 실패 시 `discard_source_capture`, 대기열 `nomad_knowflow_private.capture_object_trash`(`claim_`·`ack_capture_object_trash`, service_role), 버킷 `knowflow-captures`(PNG·WebP).
+- 앱 변경(이전 방법): 서버의 reserve→업로드→confirm 흐름을 웹 `rpc('create_source_capture')` → 반환 `storage_path`로 `knowflow-captures` 업로드(실패 시 `rpc('discard_source_capture')`)로 바꾼다. 멱등 키·pending 상태가 없으므로 재시도는 discard 후 새로 만든다. purgeCaptures는 `claim_capture_object_trash` → Storage 삭제 → `ack_capture_object_trash`로 바꾼다. 원본 데이터 이관 시 ready 행만 옮기고 pending 행은 객체와 함께 버린다(옛 데이터 없음: 아래 이관 절 참고). JPEG는 이식본 버킷이 받지 않는다.
 - 정리 대기열 시도 상한 10(`nomad_knowflow_private.capture_trash_max_attempts()`): 넘은 경로는 claim에서 빠지고 행은 남는다. 운영자는 service_role로 `list_stalled_capture_object_trash(p_limit)`(경로·attempts·stalled_total)를 보고, 원인 해결 뒤 postgres 세션에서 attempts를 0으로 되돌린다.
 
 ## 운영 데이터 이관 (task-032, org안)
