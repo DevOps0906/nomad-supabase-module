@@ -30,13 +30,22 @@ psql "<로컬 DB 주소>" -v ON_ERROR_STOP=1 -f tests/tenant_access.sql
 
 ## 기존 제품에 적용
 
-1. 대상 저장소에서 `npx supabase init` 후, 이 저장소에서 `bash scripts/install-db.sh <대상 경로> [--product <slug>[:user|org]]... [--with-accounts] [--with-example]`로 공통 마이그레이션과 선택한 제품의 이식본(`products/<slug>/`)을 복사합니다. 제품 파일은 `scripts/build-bundles.sh` 번들과 같은 이름·목록이며(`2026120100NNMM_<slug>_<파일>.sql`), 안을 생략하면 `user/`가 있으면 user안, 없으면 org안입니다. 한 제품은 한 안만 설치합니다. 격리형 `hospital`은 공통 코어 없이 단독으로만 설치하며 다른 제품·`--with-accounts`·`--with-example`과 함께 쓰거나 코어가 있는 대상에 설치하면 거부합니다. `supabase/migrations/`의 옛 제품 청사진(`*_<slug>.sql`)은 설치하지 않으며(`--with-example`의 `contentflow_example`만 예외), 대상에 옛 청사진 설치본이 있으면 경고합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
+1. 이 저장소에서(제품을 지정하면 대상에 `supabase init` 없이도 됩니다. 제품 없이 실행하면 init 이 먼저 필요합니다. 로컬 키트는 아래 "로컬 Studio 키트" 절) `bash scripts/install-db.sh <대상 경로> [--product <slug>[:user|org]]... [--with-accounts] [--with-example]`로 공통 마이그레이션과 선택한 제품의 이식본(`products/<slug>/`)을 복사합니다. 제품 파일은 `scripts/build-bundles.sh` 번들과 같은 이름·목록이며(`2026120100NNMM_<slug>_<파일>.sql`), 안을 생략하면 `user/`가 있으면 user안, 없으면 org안입니다. 한 제품은 한 안만 설치합니다. 격리형 `hospital`은 공통 코어 없이 단독으로만 설치하며 다른 제품·`--with-accounts`·`--with-example`과 함께 쓰거나 코어가 있는 대상에 설치하면 거부합니다. `supabase/migrations/`의 옛 제품 청사진(`*_<slug>.sql`)은 설치하지 않으며(`--with-example`의 `contentflow_example`만 예외), 대상에 옛 청사진 설치본이 있으면 경고합니다. `supabase/nomad.lock`에 파일 해시를 기록하며, 재실행하면 새 파일만 복사하고 `--check`로 상태만 확인합니다(0 최신 · 1 새 파일 있음 · 2 대상 파일이 달라짐). DB에는 접속하지 않습니다. 대상의 기존 마이그레이션보다 번호가 이르면 경고하며 `npx supabase db push --include-all`로 적용합니다.
 2. 실습에서는 두 번째 마이그레이션까지 적용합니다. 기존 운영 제품은 별도 제품 키를 등록하고, 기존 업체 ID·사용자 ID·멤버십을 연결하는 추가 마이그레이션을 만듭니다.
 3. 제품별 스키마에는 업무 데이터와 업체 ID를 둡니다. 기존 데이터는 소속을 확정한 뒤 채우고, 조회·쓰기 정책 검증을 완료한 다음 앱 연결을 전환합니다.
 4. Data API를 사용한다면 `public.nomad_dashboard_features`를 통해 대시보드 카탈로그를 조회합니다. 예시 업무 테이블에 Data API가 필요한 실습 환경에서만 `nomad_contentflow_example`을 노출 스키마에 추가합니다. `nomad_core`는 API에 노출하지 않습니다.
 5. 운영 환경에서는 스키마 변경을 한 CI 경로로 실행합니다. 강의·개발·운영 DB 연결값은 각각 분리합니다.
 
 [Supabase 마이그레이션](https://supabase.com/docs/guides/deployment/database-migrations) · [커스텀 스키마](https://supabase.com/docs/guides/api/using-custom-schemas)
+
+
+## 로컬 Studio 키트
+`install-db.sh --product <slug>`는 마이그레이션 복사 뒤 `scripts/install-local.sh`를 이어 실행해 대상 저장소에 로컬 실행 구성을 만듭니다(`--no-local`로 끔, 로컬 키트만은 `bash scripts/install-local.sh <대상> --product <slug>... [--site-url URL] [--check] [--force]`).
+- `supabase/config.toml`: 전용 `project_id`(`<slug>-dev`), `local/ports.yaml`의 10단위 포트 블록(+0 shadow · +1 api · +2 db · +3 studio · +4 mail · +9 pooler), `[api] schemas`에 `nomad_<slug>`, `[local_smtp]`·Auth 기본값. 첫 줄 표식(`# nomad-local: managed`)이 있으면 재실행 때 다시 생성하고, 표식이 없는 기존 파일은 건드리지 않고 `supabase/config.nomad.toml` 제안본만 씁니다(exit 2, `--force`는 `.bak` 백업 후 덮어쓰기). 여러 `--product`면 첫 제품의 포트 블록과 project_id를 씁니다.
+- `docs/runbooks/local-dev.md`: 시작·Studio·메일 주소, `db reset`, Worker 역할 비밀번호 명령, 환경 변수 이름(값 없음). 이미 있으면 `local-dev.nomad.md`로 제안합니다.
+- 잠금 파일에 `# local <slug> <포트> <해시>` 줄을 남기며 종료 코드는 0 최신 · 1 만들 파일 있음(`--check`) · 2 표식 없는 기존 config · 64 사용법 오류입니다. `install-db.sh --check`는 로컬 키트를 보지 않습니다.
+- 시작은 `npx supabase@3.2.0 start`, Studio는 `http://127.0.0.1:<블록+3>`. 번들(`bundles/`)에도 완성된 `config.toml`·`docs/local-dev.md`가 들어갑니다(`config.snippet.toml`은 기존 프로젝트 병합용으로 유지).
+- 설치기와의 차이: 제품(`--product`)을 지정하면 대상에 `supabase init`이 없어도 `supabase/migrations/`를 만듭니다. 제품 없이 실행하면 기존처럼 init을 요구합니다(exit 64).
 
 ## 기존 제품 데이터 이관
 

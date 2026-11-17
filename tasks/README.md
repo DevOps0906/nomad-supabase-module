@@ -27,6 +27,7 @@
 | task-022 | contentflow 이식본 보강: 옛 0020~0027(publish_jobs·analytics_*·sync RPC·metric tool 값) + 조직 대기 초대 목록·plan_limits 읽기 public RPC | W3 | task-021 | 높음 | builder | 완료(보안 리뷰 ACCEPT) |
 | task-023 | shorts 이식본 보강: Shopping-Shorts HEAD 3face90의 추가 마이그레이션 8개(job_queue_status·extension_*·썸네일·격리) 반영 | W3 | task-021 | 높음 | builder | 완료(org 확장 소유 검사 교정 edc6c57, 보안 리뷰 🔴 없음) |
 | task-032 | 제품 레포 5개 운영 데이터 이관 스크립트(01 동결·02 복사·03 Storage·check.sh·전환 절차서) + install-db가 accounts 항상 포함 | W3 | task-031 | 높음 | builder | 진행 중(스크립트·로컬 검증 완료분 커밋, 보안 리뷰·humscore·LOTTO-LAB accounts 재설치 남음) |
+| task-033 | 로컬 Studio 환경 키트(local/ 템플릿·포트 등록부, install-local.sh, install-db·번들 연동) | W3 | task-032 | 보통 | builder | 진행(Docker 스모크·리뷰 대기) |
 상태: 대기 / 진행 / 완료 / 보류
 
 ## 발견한 문제 (범위 밖 — 나중 작업 후보)

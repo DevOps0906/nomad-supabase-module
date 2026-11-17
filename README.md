@@ -12,6 +12,7 @@
 | 제품 이식본 `products/<slug>/` 28개 | 완료. 27개는 단일·테넌트, hospital은 격리형 | 제품 검사(`run_check.sh`) 28/28 |
 | 배포 번들 `bundles/` 56개 | 단일 27 · 테넌트 27 · 모노레포 1 · 격리형 1 | `tests/bundles.sh` 표본 5/5 |
 | 다른 저장소 설치기 | `products/` 이식본을 설치 | `tests/install_db.sh` 82/0 |
+| 로컬 Studio 키트 | `install-db.sh --product`가 `config.toml`(전용 포트·Studio)·로컬 실행 안내까지 생성 | `tests/install_local.sh` |
 | 스키마 대시보드 | 분류별 메뉴, 제품 카드, 구조도·ERD, SQL 파일별 설명 | `http://127.0.0.1:8766` |
 | 각 제품 레포 앱 코드에 적용 | 대기 | 제품별 `existing.md`의 "앱 변경" 목록 |
 
@@ -31,6 +32,7 @@
 |---|---|
 | [제품 이식본](products/) | 제품마다 `org/`·`user/` SQL, 검사 SQL, `existing.md`(기존 앱과의 차이), `local-storage.md` |
 | [설치와 통합 — 번들](docs/INTEGRATION.md#번들새-프로젝트에-바로-적용) | 번들을 새 프로젝트에 적용하는 순서 |
+| [로컬 Studio 키트](docs/INTEGRATION.md#로컬-studio-키트) | 제품별 포트·config.toml·실행 안내를 대상 저장소에 만드는 방법 |
 | [백업과 복구](docs/BACKUP_RESTORE.md) | 스키마 재현과 데이터 복구, 앱 데이터 암호화 키 |
 | [작업 표](tasks/README.md) · [현재 상태](tasks/NOW.md) | 작업 이력과 열린 결정 |
 | [설계 기획](docs/design/00-overview/principles.md) | 원칙·구조·제품별 이식 메모 |
@@ -42,7 +44,7 @@ SQL 파일을 SQL Editor에 복사해 붙여 넣는 방식은 권하지 않습�
 | 상황 | 방법 |
 |---|---|
 | 새 Supabase 프로젝트 | `bash scripts/build-bundles.sh`로 번들을 만들고 `bundles/<single\|tenant>/<slug>/supabase/migrations/`를 대상 저장소에 넣습니다. 그다음 `npx supabase link`, `npx supabase db push` 순서로 적용합니다. 번들의 `README.md`에 확장과 워커 역할 안내가 있습니다. |
-| 기존 제품 저장소 | `bash scripts/install-db.sh <대상 경로> --product <slug>[:user\|org]`로 실행합니다. 공통 코어와 이식본이 대상의 `supabase/migrations/`에 복사되고 해시가 잠금 파일에 기록됩니다. 그다음 `npx supabase db push`로 적용합니다. |
+| 기존 제품 저장소 | `bash scripts/install-db.sh <대상 경로> --product <slug>[:user  `supabase/config.toml`(전용 포트·Studio)과 `docs/runbooks/local-dev.md`도 함께 만들어집니다(`--no-local`로 끔).\|org]`로 실행합니다. 공통 코어와 이식본이 대상의 `supabase/migrations/`에 복사되고 해시가 잠금 파일에 기록됩니다. 그다음 `npx supabase db push`로 적용합니다. |
 
 기존 운영 DB에 이미 같은 이름의 표가 있으면 바로 적용하면 안 됩니다. 제품의 `existing.md`에 적힌 차이와 데이터 이전 절차를 먼저 확인합니다.
 
@@ -135,6 +137,8 @@ cd tools/schema-dashboard/docker && DASHBOARD_PORT=8766 docker compose up -d --b
 | `supabase/migrations/20261115000101~111_<서비스>.sql` | 서비스 스키마 11개 (조직형 7 · 개인형 4, 청사진에서 확정) |
 | `products/<slug>/` | 제품별 DB 이식본 28개(단일 user안·테넌트 org안·hospital 격리형), 검사 SQL·기존 앱 차이 문서 |
 | `scripts/install-db.sh` | 공통 코어와 제품 이식본(`products/<slug>/`)을 다른 Supabase 저장소로 복사·잠금 기록 (`--product <slug>[:user\|org]`·`--with-accounts`·`--check`) |
+| `scripts/install-local.sh` · `local/` | 로컬 Studio 키트: 제품별 포트 블록(`local/ports.yaml`)으로 `supabase/config.toml`·`docs/runbooks/local-dev.md` 생성 (`--product`·`--site-url`·`--check`·`--force`) |
+| `tests/install_local.sh` | 로컬 키트 생성·멱등·기존 config 보존·install-db 연동 검증 |
 | `tests/tenant_access.sql` | 합성 업체 3곳으로 접근·기능 잠금 검증 |
 | `tests/accounts.sql` | 가입·초대·좌석 한도·크레딧 차감·멤버 관리 검증 |
 | `tests/services_access.sql` | 서비스 11개의 RLS·권한·업체/사용자 격리 검증 |

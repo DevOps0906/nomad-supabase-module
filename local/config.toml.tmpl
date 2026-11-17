@@ -1,0 +1,41 @@
+# nomad-local: managed
+# NOMAD 로컬 Supabase 구성(scripts/install-local.sh 가 만든다). 이 표식 줄이 있는 동안 재실행하면 다시 생성된다.
+# 직접 고치려면 첫 줄 표식을 지운다(그러면 install-local 은 이 파일을 건드리지 않고 config.nomad.toml 제안본만 쓴다).
+# 시작: npx supabase@3.2.0 start  ·  Studio: http://127.0.0.1:@@STUDIO@@
+project_id = "@@PROJECT_ID@@"
+
+[api]
+port = @@API@@
+# nomad_core · *_private 스키마는 API에 노출하지 않는다.
+schemas = [@@SCHEMAS@@]
+
+[db]
+port = @@DB@@
+shadow_port = @@SHADOW@@
+
+[db.pooler]
+port = @@POOLER@@
+
+[studio]
+port = @@STUDIO@@
+
+# 메일 확인(구 inbucket 대체, Mailpit)
+[local_smtp]
+port = @@MAIL@@
+
+[analytics]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[auth]
+site_url = "@@SITE_URL@@"
+additional_redirect_urls = ["@@SITE_URL@@/api/auth/callback"]
+minimum_password_length = 10
+
+[auth.rate_limit]
+email_sent = 10          # 시간당 인증 메일 수(프로젝트 전체)
+token_refresh = 150      # 5분당 IP별 토큰 갱신
+sign_in_sign_ups = 30    # 5분당 IP별 로그인·가입
+token_verifications = 30 # 5분당 IP별 OTP·링크 검증

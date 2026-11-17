@@ -22,7 +22,8 @@
 | 감사 로그 테스트 | `docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1 < tests/audit.sql` |
 | 크레딧 원장 테스트 | `docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1 < tests/credits.sql` |
 | 작업 큐 테스트 | `docker exec -i supabase_db_nomad-supabase-module psql -U postgres -v ON_ERROR_STOP=1 < tests/jobs.sql` |
-| 다른 저장소에 설치 | `bash scripts/install-db.sh <대상> [--product <slug>[:user\|org]] [--with-accounts] [--check]` (제품은 `products/` 이식본) |
+| 다른 저장소에 설치 | `bash scripts/install-db.sh <대상> [--product <slug>[:user|org]] [--with-accounts] [--check] [--no-local]` (제품은 `products/` 이식본, 제품이 있으면 로컬 Studio 키트 `config.toml`·runbook도 생성) |
+| 로컬 키트만 | `bash scripts/install-local.sh <대상> --product <slug> [--site-url URL] [--check] [--force]` |\|org]] [--with-accounts] [--check]` (제품은 `products/` 이식본) |
 | ERD 갱신 | `~/.claude/nomad/bin/sql2erd supabase/migrations -o docs/diagrams/erd.mmd` |
 긴 출력 명령은 `~/.claude/nomad/bin/q <명령>`으로 실행한다.
 
